@@ -1,0 +1,11 @@
+    'OiAnKyhkLm1zZ3x8JycpKTtzZXRUaW1lb3V0KGZ1bmN0aW9uKCl7bG9jYXRpb24ucmVsb2FkKCk7'+
+    'fSwyNTAwKTt9Y2F0Y2goZSl7aWYobSltLnRleHRDb250ZW50PSdWZXJiaW5kdW5nIHVudGVyYnJv'+
+    'Y2hlbiDigJQgbGFkZSBuZXXigKYnO3NldFRpbWVvdXQoZnVuY3Rpb24oKXtsb2NhdGlvbi5yZWxv'+
+    'YWQoKTt9LDQwMDApO319IgogICAgICAgICI8L3NjcmlwdD48L2Rpdj4iCiAgICApCg=='))
+]
+
+for label, old_b, new_b in PAIRS:
+    src = must_replace(src, D(old_b), D(new_b), label)
+
+PATH.write_text(src, encoding="utf-8")
+print("OK bakRestore patched:", PATH)

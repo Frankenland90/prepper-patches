@@ -7,7 +7,21 @@ TOOLS="$APP/tools"
 TMP="/tmp/prepper-bakrestore-$$"
 mkdir -p "$TMP" "$TOOLS"
 
-curl -fsSL "$BASE/patch-backup-restore.py" -o "$TMP/patch-backup-restore.py"
+# Assemble patch from manifest parts (fallback: single file)
+if curl -fsSL "$BASE/patch-backup-restore.manifest" -o "$TMP/manifest" 2>/dev/null; then
+  : > "$TMP/patch-backup-restore.py"
+  while IFS= read -r part; do
+    [[ -z "$part" ]] && continue
+    curl -fsSL "$BASE/$part" >> "$TMP/patch-backup-restore.py"
+  done < "$TMP/manifest"
+elif curl -fsSL "$BASE/patch-backup-restore.py" -o "$TMP/patch-backup-restore.py" \
+  && [[ $(wc -c < "$TMP/patch-backup-restore.py") -gt 100 ]]; then
+  :
+else
+  echo "ERR: could not download patch" >&2
+  exit 1
+fi
+
 curl -fsSL "$BASE/backup.sh" -o "$TMP/backup.sh"
 curl -fsSL "$BASE/restore.sh" -o "$TMP/restore.sh"
 
