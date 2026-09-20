@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+"""Patch dashboard.py: DWD Warnungen + WBI (Punkt 2+3), Mesh Stil C Emoji. Idempotent via /* dwdV3 */."""
+from pathlib import Path
+import sys
+
+PATH = Path(sys.argv[1] if len(sys.argv) > 1 else "/home/fmg/prepper-dashboard/dashboard.py")
+src = PATH.read_text(encoding="utf-8")
+
+if "/* dwdV3 */" in src:
+    print("DWD v3 ist schon drin — nichts geaendert.")
+    raise SystemExit(0)
+
+
+def must_replace(text, old, new, label):
+    n = text.count(old)
+    if n != 1:
+        raise SystemExit("STOP %s: Anker %sx gefunden (erwartet 1). Datei unberuehrt." % (label, n))
+    return text.replace(old, new, 1)
+
+
+# --- 1) Konstanten + History-Deque ---
+src = must_replace(
+    src,
+    'OUTAGE_HISTORY_FILE = "outage_history.json"\n',
+    'OUTAGE_HISTORY_FILE = "outage_history.json"\n'
+    'WBI_HISTORY_FILE = "wbi_history.json"\n'
+    'DWD_MESH_STATUS_FILE = "/home/fmg/prepper-dashboard/dwd_mesh_status.json"\n'
+    'DWD_WBI_STATUS_FILE = "/home/fmg/prepper-dashboard/dwd_wbi_status.json"\n',
+    "WBI/DWD file constants",
+)
+
+src = must_replace(
+    src,
+    "outage_history = deque(maxlen=1344)\n",
+    "outage_history = deque(maxlen=1344)\n"
+    "wbi_history = deque(maxlen=90)\n",
+    "wbi_history deque",
+)
+
+# --- 2) Fetcher + Mesh nach fetch_nina ---
+FETCH_AND_MESH = r'''
+# /* dwdV3 */
+DWD_WARN_CELLS = {
+    "809572137": "Kalchreuth",
+    "809572457": "Kalchreuther Forst",
+    "809562000": "Erlangen",
+    "109572000": "Kreis ERH",
+    "809574155": "Schnaittach",
+}
+DWD_ERLANGEN_ALT = "109562000"
+DWD_WBI_URL = (  # /* wbiForecast */
+    "https://opendata.dwd.de/climate_environment/CDC/derived_germany/"
+    "fire_danger_index/woodland/forecast/recent/"
+    "derived_germany_fire_danger_index_woodland_forecast_recent_3668_v2-3--0.csv.gz"
+)
+last_dwd_mesh = None
+last_dwd_mesh_status = {"ok": None, "text": "", "at": None, "received": None, "cleared": None}
+last_dwd_wbi_stage = None
+last_dwd_wbi_mesh_status = {"ok": None, "text": "", "at": None, "stage": None}
+
+
+def _dwd_level_color(level):
+    try:
+        lv = int(level or 0)
+    except Exception:
+        lv = 0
+    if lv >= 4:
+        return "#ef4444"
+    if lv >= 3:
+        return "#f97316"
+    if lv >= 2:
+        return "#eab308"
+    if lv >= 1:
+        return "#84cc16"
+    return "#22c55e"
+
+
+def _dwd_wbi_color(stage):
+    try:
+        n = int(stage)
+    except Exception:
+        return "#94a3b8"
+    return {1: "#22c55e", 2: "#84cc16", 3: "#eab308", 4: "#f97316", 5: "#ef4444"}.get(n, "#94a3b8")
+
+
+def _dwd_ms_to_str(ms):
+    if ms is None:
+        return None
+    try:
+        return datetime.fromtimestamp(int(ms) / 1000.0).strftime("%d.%m.%Y %H:%M")
+    except Exception:
+        return None
+
+
+def load_wbi_history():
+    if os.path.exists(WBI_HISTORY_FILE):
+        try:
+            with open(WBI_HISTORY_FILE, "r") as f:
+                data = json.load(f)
+                wbi_history.clear()
+                for item in data.get("wbi", [])[-90:]:
+                    wbi_history.append(item)
+        except Exception:
+            pass
+
+
+def save_wbi_history():
+    try:
+        with open(WBI_HISTORY_FILE, "w") as f:
+            json.dump({"wbi": list(wbi_history)}, f)
+    except Exception as e:
+        print("wbi history save:", e)
+
+
+def load_dwd_mesh_status():
+    global last_dwd_mesh_status, last_dwd_mesh, last_dwd_wbi_stage, last_dwd_wbi_mesh_status
+    try:
+        with open(DWD_MESH_STATUS_FILE) as f:
+            d = json.load(f)
+            last_dwd_mesh_status = d
+            if d.get("text") and not d.get("cleared"):
+                last_dwd_mesh = d.get("text")
+    except Exception:
+        pass
+    try:
+        with open(DWD_WBI_STATUS_FILE) as f:
+            d = json.load(f)
+            last_dwd_wbi_mesh_status = d
+            if d.get("stage") is not None:
+                last_dwd_wbi_stage = d.get("stage")
+    except Exception:
+        pass
+
+
+def save_dwd_mesh_status(text, cleared=None):
+    d = {
+        "ok": True,
+        "text": (text or "")[:300],
+        "at": now_str(),
+        "received": now_str(),
+        "sent": now_str(),
+        "cleared": cleared,
+    }
+    try:
+        with open(DWD_MESH_STATUS_FILE, "w") as f:
+            json.dump(d, f, ensure_ascii=False)
+    except Exception as e:
+        print("dwd mesh json:", e)
+
+
+def save_dwd_wbi_status(stage, text=None):
+    global last_dwd_wbi_mesh_status
+    d = {
+        "ok": True,
+        "stage": stage,
+        "text": (text or "")[:200],
+        "at": now_str(),
+    }
+    last_dwd_wbi_mesh_status = d
+    try:
+        with open(DWD_WBI_STATUS_FILE, "w") as f:
+            json.dump(d, f, ensure_ascii=False)
+    except Exception as e:
+        print("dwd wbi json:", e)
+
+
+def fetch_dwd_warnungen():
+    """DWD Warnungen JSONP fuer lokale Warnzellen. Fail -> leeres dict."""
+    empty = {
+        "items": [],
+        "max_level": 0,
+        "count": 0,
+        "cells": list(DWD_WARN_CELLS.keys()),
+    }
+    try:
+        r = requests.get(
+            "https://www.dwd.de/DWD/warnungen/warnapp/json/warnings.json",
+            timeout=12,
+            headers={"User-Agent": "KaeswasserLage/1.0"},
+        )
+        if r.status_code != 200 or not r.text.strip():
+            update_fail_counter("dwd_warn", False)
+            print("DWD Warn: HTTP", r.status_code)
+            return empty
+        raw = r.text.strip()
+        if raw.startswith("warnWetter.loadWarnings("):
+            raw = raw[len("warnWetter.loadWarnings("):]
+            if raw.endswith(");"):
+                raw = raw[:-2]
+            elif raw.endswith(")"):
+                raw = raw[:-1]
+        data = json.loads(raw)
+        warnings = data.get("warnings") or {}
+        items = []
+
+        def collect_cell(cid, name):
+            found = []
+            for key in (str(cid), cid):
+                arr = 

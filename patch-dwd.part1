@@ -1,0 +1,49 @@
+warnings.get(key) or warnings.get(str(key))
+                if arr:
+                    found = arr
+                    break
+            out = []
+            for w in found if isinstance(found, list) else []:
+                if not isinstance(w, dict):
+                    continue
+                try:
+                    level = int(w.get("level") or 0)
+                except Exception:
+                    level = 0
+                out.append({
+                    "cell": str(cid),
+                    "name": name,
+                    "level": level,
+                    "event": (w.get("event") or "").strip(),
+                    "headline": (w.get("headline") or "").strip(),
+                    "description": (w.get("description") or "").strip(),
+                    "instruction": (w.get("instruction") or "").strip(),
+                    "start": _dwd_ms_to_str(w.get("start")),
+                    "end": _dwd_ms_to_str(w.get("end")),
+                })
+            return out
+
+        for cid, name in DWD_WARN_CELLS.items():
+            cell_items = collect_cell(cid, name)
+            if not cell_items and cid == "809562000":
+                cell_items = collect_cell(DWD_ERLANGEN_ALT, name)
+                for it in cell_items:
+                    it["cell"] = DWD_ERLANGEN_ALT
+            items.extend(cell_items)
+
+        items.sort(key=lambda x: int(x.get("level") or 0), reverse=True)
+        max_level = max((int(x.get("level") or 0) for x in items), default=0)
+        update_fail_counter("dwd_warn", True)
+        return {
+            "items": items,
+            "max_level": max_level,
+            "count": len(items),
+            "cells": list(DWD_WARN_CELLS.keys()),
+            "color": _dwd_level_color(max_level),
+        }
+    except Exception as e:
+        update_fail_counter("dwd_warn", False)
+        print("DWD Warn:", e)
+        return empty
+
+
