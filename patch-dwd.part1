@@ -47,3 +47,109 @@ warnings.get(key) or warnings.get(str(key))
         return empty
 
 
+def fetch_dwd_wbi():
+    """WBI Nürnberg (3668) aus DWD forecast/recent (wbi_0 = heute)."""
+    result = {
+        "station_id": "3668",
+        "station_name": "Nürnberg",
+        "distance_km": 8.2,
+        "wbi": None,
+        "date": None,
+        "date_fmt": None,
+        "termin": None,
+        "forecast": [],
+        "stale": True,
+        "color": "#94a3b8",
+    }
+    try:
+        import gzip as _gzip
+        r = requests.get(DWD_WBI_URL, timeout=20, headers={"User-Agent": "KaeswasserLage/1.0"})
+        if r.status_code != 200 or not r.content:
+            update_fail_counter("dwd_wbi", False)
+            print("DWD WBI: HTTP", r.status_code)
+            return result
+        text = _gzip.decompress(r.content).decode("utf-8", "replace")
+        data_lines = []
+        for ln in text.splitlines():
+            ln = ln.strip()
+            if not ln or ln.startswith("#") or ln.lower().startswith("stations"):
+                continue
+            data_lines.append(ln)
+        if not data_lines:
+            update_fail_counter("dwd_wbi", False)
+            print("DWD WBI: keine Datenzeilen")
+            return result
+        last = data_lines[-1]
+        parts = [p.strip() for p in last.split(";")]
+        # forecast: StationsID;Termin;wbi_0;...;wbi_6
+        # recomputed fallback: Stationsid;Datum;wbi
+        if len(parts) < 3:
+            update_fail_counter("dwd_wbi", False)
+            return result
+        sid = parts[0] or "3668"
+        termin = parts[1]
+        forecast = []
+        wbi_v = None
+        if len(parts) >= 9:
+            for p in parts[2:9]:
+                try:
+                    forecast.append(int(float(p.replace(",", "."))))
+                except Exception:
+                    forecast.append(None)
+            wbi_v = forecast[0]
+        else:
+            try:
+                wbi_v = int(float(parts[2].replace(",", ".")))
+            except Exception:
+                wbi_v = None
+            forecast = [wbi_v] if wbi_v is not None else []
+        date_fmt = None
+        date_key = None
+        stale = True
+        try:
+            # "20260920 04:14" oder "20260821"
+            dt = datetime.strptime(termin[:8], "%Y%m%d")
+            date_fmt = dt.strftime("%d.%m.%Y")
+            date_key = termin[:8]
+            stale = dt.date() < (now().date() - timedelta(days=1))
+        except Exception:
+            date_fmt = termin
+            date_key = termin[:8] if termin else None
+            stale = True
+        result.update({
+            "station_id": sid,
+            "station_name": "Nürnberg",
+            "distance_km": 8.2,
+            "wbi": wbi_v,
+            "date": date_key,
+            "date_fmt": date_fmt,
+            "termin": termin,
+            "forecast": forecast,
+            "stale": stale,
+            "color": _dwd_wbi_color(wbi_v) if wbi_v is not None else "#94a3b8",
+        })
+        if wbi_v is not None and date_fmt:
+            t_short = date_fmt[:5] if len(date_fmt) >= 5 else date_fmt
+            if not wbi_history or wbi_history[-1].get("t") != t_short or wbi_history[-1].get("v") != wbi_v:
+                if wbi_history and wbi_history[-1].get("t") == t_short:
+                    wbi_history[-1] = {"t": t_short, "v": wbi_v}
+                else:
+                    wbi_history.append({"t": t_short, "v": wbi_v})
+                save_wbi_history()
+        update_fail_counter("dwd_wbi", wbi_v is not None)
+        return result
+    except Exception as e:
+        update_fail_counter("dwd_wbi", False)
+        print("DWD WBI:", e)
+        return result
+
+
+def maybe_mesh_dwd(items):
+    """Mesh 1: DWD-Warnungen analog NINA (Aenderung / Entwarnung)."""
+    global last_dwd_mesh, last_dwd_mesh_status
+    try:
+        if items is None:
+            return False
+        if fail_counters.get("dwd_warn", 0) > 0:
+            print("DWD: Fetch fehlgeschlagen – Mesh unverändert")
+            
