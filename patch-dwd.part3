@@ -1,0 +1,111 @@
+wd(_dwv.get("items") if isinstance(_dwv, dict) else None)\n'
+    '        except Exception as _de:\n'
+    '            print("DWD-Mesh-Hook:", _de)\n'
+    '        try:\n'
+    '            maybe_mesh_dwd_wbi((data_store.get("dwd_wbi") or {}).get("value"))\n'
+    '        except Exception as _we:\n'
+    '            print("DWD-WBI-Mesh-Hook:", _we)\n',
+    "mesh hooks DWD",
+)
+
+# --- 6) PAGE3 UI after Wetter card ---
+UI_CARDS = r'''    <div class="small" style="color:{{ wetter.color }}">{{ wetter.updated }}</div>
+  </div>
+  <!-- dwdV3 -->
+  <div class="card full">
+    <div class="title">⚠️ DWD Warnungen</div>
+    {% set dw = dwd_warn.value if dwd_warn is defined and dwd_warn.value else {} %}
+    {% set ml = dw.get('max_level', 0) if dw is mapping else 0 %}
+    <div class="big" style="color:{{ dw.get('color', '#22c55e') if dw is mapping else '#22c55e' }}">Stufe {{ ml if ml is not none else 0 }}</div>
+    <div class="small" style="color:#94a3b8;margin-bottom:6px">Kalchreuth · Forst · Erlangen · ERH · Schnaittach · DWD</div>
+    {% if dw is mapping and dw.get('items') %}
+      <div style="margin-top:6px;font-size:0.82rem;line-height:1.45">
+      {% for it in dw.get('items') %}
+        <div style="padding:5px 0;border-bottom:1px solid #1e293b">
+          <b>{{ it.name }}</b>
+          <span style="color:{{ '#ef4444' if (it.level or 0) >= 4 else ('#f97316' if (it.level or 0) >= 3 else ('#eab308' if (it.level or 0) >= 2 else '#84cc16')) }}"> · St. {{ it.level }}</span>
+          <div>{{ it.event or it.headline or '–' }}</div>
+          {% if it.headline and it.event and it.headline != it.event %}<div class="small" style="color:#94a3b8">{{ it.headline }}</div>{% endif %}
+          {% if it.start or it.end %}<div class="small" style="color:#64748b">{{ it.start or '–' }} – {{ it.end or '–' }}</div>{% endif %}
+        </div>
+      {% endfor %}
+      </div>
+    {% else %}
+      <div class="small">Keine lokalen DWD-Warnungen</div>
+    {% endif %}
+    <div class="small" style="margin-top:6px;color:#64748b">Quelle: DWD</div>
+    <div class="small" style="color:{{ dwd_warn.color if dwd_warn is defined else '#94a3b8' }}">{{ dwd_warn.updated if dwd_warn is defined else '' }}</div>
+    {% if dwd_mesh_status is defined and dwd_mesh_status %}
+      <div class="small" style="margin-top:4px;color:#64748b">
+        Mesh · {% if dwd_mesh_status.cleared %}Entwarnung {{ dwd_mesh_status.cleared }}{% elif dwd_mesh_status.text %}{{ dwd_mesh_status.text[:80] }}{% else %}–{% endif %}
+        {% if dwd_mesh_status.at %} · {{ dwd_mesh_status.at }}{% endif %}
+      </div>
+    {% endif %}
+  </div>
+  <div class="card">
+    <div class="title">🔥 DWD WBI · Waldbrand</div>
+    {% set wb = dwd_wbi.value if dwd_wbi is defined and dwd_wbi.value else {} %}
+    {% if wb is mapping and wb.get('wbi') is not none %}
+      <div class="big" style="color:{{ wb.get('color', '#e2e8f0') }}">Stufe {{ wb.wbi }}</div>
+      {% if wb.get('stale') %}<div class="small" style="color:#eab308">Datenstand veraltet ({{ wb.get('date_fmt') or wb.get('date') or '–' }})</div>{% endif %}
+      <div class="small" style="margin-top:4px">Station {{ wb.get('station_name') or 'Nürnberg' }} ({{ wb.get('station_id') or '3668' }}) · {{ wb.get('distance_km') or 8.2 }} km</div>
+      <div class="small" style="color:#94a3b8">Datum {{ wb.get('date_fmt') or wb.get('date') or '–' }}{% if wb.get('termin') %} · {{ wb.get('termin') }}{% endif %}</div>
+      {% if wb.get('forecast') and wb.forecast|length > 1 %}
+      <div class="small" style="margin-top:4px;color:#94a3b8">Vorhersage:
+        {% for v in wb.forecast %}{% if loop.index0 == 0 %}heute {{ v }}{% else %}+{{ loop.index0 }}:{{ v }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}
+      </div>
+      {% endif %}
+    {% else %}
+      <div class="small">Keine WBI-Daten</div>
+    {% endif %}
+    {% if wbi_history is defined and wbi_history %}
+      <div class="small" style="margin-top:6px;color:#64748b;word-break:break-word">
+        Verlauf:
+        {% for h in wbi_history[-14:] %}{{ h.t }}:{{ h.v }}{% if not loop.last %} · {% endif %}{% endfor %}
+      </div>
+    {% endif %}
+    <div class="small" style="margin-top:6px;color:#64748b">Quelle: DWD WBI Forecast</div>
+    <div class="small" style="color:{{ dwd_wbi.color if dwd_wbi is defined else '#94a3b8' }}">{{ dwd_wbi.updated if dwd_wbi is defined else '' }}</div>
+  </div>
+  <div class="card full" style="padding:10px;text-align:center">'''
+
+src = must_replace(
+    src,
+    '''    <div class="small" style="color:{{ wetter.color }}">{{ wetter.updated }}</div>
+  </div>
+  <div class="card full" style="padding:10px;text-align:center">''',
+    UI_CARDS,
+    "PAGE3 DWD cards",
+)
+
+# --- 7) page3 route: expose dwd_mesh_status ---
+src = must_replace(
+    src,
+    '    data_store["odl_mesh_status"] = last_odl_mesh_status\n'
+    '    data_store["mesh_weather_status"] = {\n'
+    '        "auto": last_mesh_weather_auto,\n'
+    '        "manual": last_mesh_weather_manual,\n'
+    '    }\n'
+    '    return render_template_string(PAGE3, **data_store)\n',
+    '    data_store["odl_mesh_status"] = last_odl_mesh_status\n'
+    '    data_store["dwd_mesh_status"] = last_dwd_mesh_status\n'
+    '    data_store["mesh_weather_status"] = {\n'
+    '        "auto": last_mesh_weather_auto,\n'
+    '        "manual": last_mesh_weather_manual,\n'
+    '    }\n'
+    '    return render_template_string(PAGE3, **data_store)\n',
+    "page3 dwd_mesh_status",
+)
+
+# --- 8) Startup loads ---
+src = must_replace(
+    src,
+    '    load_outage_history()\n',
+    '    load_outage_history()\n'
+    '    load_wbi_history()\n'
+    '    load_dwd_mesh_status()\n',
+    "startup load DWD",
+)
+
+PATH.write_text(src, encoding="utf-8")
+print("OK: DWD v3 gepatcht ->", PATH)
