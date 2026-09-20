@@ -1,0 +1,273 @@
+return False
+        parts = []
+        for w in items or []:
+            if not isinstance(w, dict):
+                continue
+            name = (w.get("name") or "").strip()
+            ev = (w.get("event") or w.get("headline") or "").strip()
+            line = ("%s %s" % (name, ev)).strip()
+            if line:
+                parts.append(line)
+        key = " · ".join(parts)[:160] if parts else ""
+
+        if not key:
+            if not last_dwd_mesh:
+                return False
+            text = "✅ DWD Entwarnung – lokal keine Warnung"
+            ok = send_meshtastic(text)
+            ts = now_str()
+            last_dwd_mesh_status = {
+                "ok": ok,
+                "text": text,
+                "at": ts if ok else (last_dwd_mesh_status or {}).get("at"),
+                "received": (last_dwd_mesh_status or {}).get("received"),
+                "cleared": ts if ok else None,
+                "sent": ts if ok else None,
+            }
+            if ok:
+                last_dwd_mesh = None
+                save_dwd_mesh_status(text, cleared=ts)
+                print("DWD-Mesh Entwarnung OK")
+            else:
+                print("DWD-Mesh Entwarnung FAIL")
+            return ok
+
+        if key == last_dwd_mesh:
+            return False
+
+        text = ("🌪 DWD · " + key)[:200]
+        ok = send_meshtastic(text)
+        ts = now_str()
+        last_dwd_mesh_status = {
+            "ok": ok,
+            "text": key,
+            "at": ts if ok else None,
+            "received": ts,
+            "cleared": None,
+            "sent": ts if ok else None,
+        }
+        if ok:
+            last_dwd_mesh = key
+            save_dwd_mesh_status(key, cleared=None)
+            print("DWD-Mesh OK:", key[:80])
+        else:
+            print("DWD-Mesh FAIL:", key[:80])
+        return ok
+    except Exception as e:
+        print("maybe_mesh_dwd:", e)
+        return False
+
+
+def maybe_mesh_dwd_wbi(wbi_dict):
+    """Mesh sparsam: nur Schwellwert-Uebergaenge WBI >=4 bzw. Rueckgang <=2."""
+    global last_dwd_wbi_stage
+    try:
+        if not isinstance(wbi_dict, dict):
+            return False
+        if wbi_dict.get("stale"):
+            return False
+        wbi = wbi_dict.get("wbi")
+        if not isinstance(wbi, int):
+            return False
+        prev = last_dwd_wbi_stage
+        if prev is None:
+            last_dwd_wbi_stage = wbi
+            save_dwd_wbi_status(wbi)
+            return False
+        send_text = None
+        if prev < 4 and wbi >= 4:
+            send_text = "🔥 DWD WBI Nürnberg: %s/5" % wbi
+        elif prev >= 4 and wbi <= 2:
+            send_text = "✅ DWD WBI Nürnberg: Stufe %s" % wbi
+        last_dwd_wbi_stage = wbi
+        if not send_text:
+            save_dwd_wbi_status(wbi)
+            return False
+        ok = send_meshtastic(send_text[:200])
+        if ok:
+            save_dwd_wbi_status(wbi, text=send_text)
+            print("DWD-WBI-Mesh OK:", send_text)
+        else:
+            print("DWD-WBI-Mesh FAIL:", send_text)
+            # Stufe trotzdem fortschreiben, damit nicht gespamt wird? Spec: persist lightly on OK-ish.
+            # Bei FAIL Stufe behalten fuer Retry beim naechsten Zyklus mit gleichem Schwellwert:
+            last_dwd_wbi_stage = prev
+        return ok
+    except Exception as e:
+        print("maybe_mesh_dwd_wbi:", e)
+        return False
+
+
+'''
+
+src = must_replace(
+    src,
+    '    update_fail_counter("nina", True)\n    return warnings[:8]\n\n\ndef fetch_metalle():\n',
+    '    update_fail_counter("nina", True)\n    return warnings[:8]\n'
+    + FETCH_AND_MESH
+    + "\ndef fetch_metalle():\n",
+    "insert DWD fetch/mesh after fetch_nina",
+)
+
+# --- 3) build_source_status catalog ---
+src = must_replace(
+    src,
+    '        ("nina", "NINA", "NINA"),\n',
+    '        ("nina", "NINA", "NINA"),\n'
+    '        ("dwd_warn", "DWD Warnungen", "DWD"),\n'
+    '        ("dwd_wbi", "DWD WBI", "DWD / Nürnberg"),\n',
+    "source catalog DWD",
+)
+
+# --- 4) calculate_lage light touch ---
+src = must_replace(
+    src,
+    '    if nina: return "AUFFÄLLIG", "#eab308", "Warnungen vorhanden"\n',
+    '    if nina: return "AUFFÄLLIG", "#eab308", "Warnungen vorhanden"\n'
+    '    try:\n'
+    '        _dw = (data.get("dwd_warn") or {}).get("value") or {}\n'
+    '        if isinstance(_dw, dict) and int(_dw.get("max_level") or 0) >= 3:\n'
+    '            return "AUFFÄLLIG", "#eab308", "DWD-Wetterwarnung Stufe %s" % _dw.get("max_level")\n'
+    '    except Exception:\n'
+    '        pass\n',
+    "calculate_lage DWD",
+)
+
+# --- 5) update_all data_store keys ---
+src = must_replace(
+    src,
+    '        "outage_history": list(outage_history),\n',
+    '        "outage_history": list(outage_history),\n'
+    '        "dwd_warn": {"value": fetch_dwd_warnungen(), "updated": now_str(), "color": get_freshness_color("dwd_warn")},\n'
+    '        "dwd_wbi": {"value": fetch_dwd_wbi(), "updated": now_str(), "color": get_freshness_color("dwd_wbi")},\n'
+    '        "wbi_history": list(wbi_history),\n',
+    "update_all dwd keys",
+)
+
+src = must_replace(
+    src,
+    '    data_store["nina_mesh_status"] = last_nina_mesh_status\n'
+    '    data_store["lage"] = {"text": text, "color": color, "reason": reason}',
+    '    data_store["nina_mesh_status"] = last_nina_mesh_status\n'
+    '    data_store["dwd_mesh_status"] = last_dwd_mesh_status\n'
+    '    data_store["lage"] = {"text": text, "color": color, "reason": reason}',
+    "update_all dwd_mesh_status",
+)
+
+src = must_replace(
+    src,
+    '        maybe_mesh_nina(data_store.get("nina", {}).get("value"))\n',
+    '        maybe_mesh_nina(data_store.get("nina", {}).get("value"))\n'
+    '        try:\n'
+    '            _dwv = (data_store.get("dwd_warn") or {}).get("value") or {}\n'
+    '            maybe_mesh_dwd(_dwv.get("items") if isinstance(_dwv, dict) else None)\n'
+    '        except Exception as _de:\n'
+    '            print("DWD-Mesh-Hook:", _de)\n'
+    '        try:\n'
+    '            maybe_mesh_dwd_wbi((data_store.get("dwd_wbi") or {}).get("value"))\n'
+    '        except Exception as _we:\n'
+    '            print("DWD-WBI-Mesh-Hook:", _we)\n',
+    "mesh hooks DWD",
+)
+
+# --- 6) PAGE3 UI after Wetter card ---
+UI_CARDS = r'''    <div class="small" style="color:{{ wetter.color }}">{{ wetter.updated }}</div>
+  </div>
+  <!-- dwdV3 -->
+  <div class="card full">
+    <div class="title">⚠️ DWD Warnungen</div>
+    {% set dw = dwd_warn.value if dwd_warn is defined and dwd_warn.value else {} %}
+    {% set ml = dw.get('max_level', 0) if dw is mapping else 0 %}
+    <div class="big" style="color:{{ dw.get('color', '#22c55e') if dw is mapping else '#22c55e' }}">Stufe {{ ml if ml is not none else 0 }}</div>
+    <div class="small" style="color:#94a3b8;margin-bottom:6px">Kalchreuth · Forst · Erlangen · ERH · Schnaittach · DWD</div>
+    {% if dw is mapping and dw.get('items') %}
+      <div style="margin-top:6px;font-size:0.82rem;line-height:1.45">
+      {% for it in dw.get('items') %}
+        <div style="padding:5px 0;border-bottom:1px solid #1e293b">
+          <b>{{ it.name }}</b>
+          <span style="color:{{ '#ef4444' if (it.level or 0) >= 4 else ('#f97316' if (it.level or 0) >= 3 else ('#eab308' if (it.level or 0) >= 2 else '#84cc16')) }}"> · St. {{ it.level }}</span>
+          <div>{{ it.event or it.headline or '–' }}</div>
+          {% if it.headline and it.event and it.headline != it.event %}<div class="small" style="color:#94a3b8">{{ it.headline }}</div>{% endif %}
+          {% if it.start or it.end %}<div class="small" style="color:#64748b">{{ it.start or '–' }} – {{ it.end or '–' }}</div>{% endif %}
+        </div>
+      {% endfor %}
+      </div>
+    {% else %}
+      <div class="small">Keine lokalen DWD-Warnungen</div>
+    {% endif %}
+    <div class="small" style="margin-top:6px;color:#64748b">Quelle: DWD</div>
+    <div class="small" style="color:{{ dwd_warn.color if dwd_warn is defined else '#94a3b8' }}">{{ dwd_warn.updated if dwd_warn is defined else '' }}</div>
+    {% if dwd_mesh_status is defined and dwd_mesh_status %}
+      <div class="small" style="margin-top:4px;color:#64748b">
+        Mesh · {% if dwd_mesh_status.cleared %}Entwarnung {{ dwd_mesh_status.cleared }}{% elif dwd_mesh_status.text %}{{ dwd_mesh_status.text[:80] }}{% else %}–{% endif %}
+        {% if dwd_mesh_status.at %} · {{ dwd_mesh_status.at }}{% endif %}
+      </div>
+    {% endif %}
+  </div>
+  <div class="card">
+    <div class="title">🔥 DWD WBI · Waldbrand</div>
+    {% set wb = dwd_wbi.value if dwd_wbi is defined and dwd_wbi.value else {} %}
+    {% if wb is mapping and wb.get('wbi') is not none %}
+      <div class="big" style="color:{{ wb.get('color', '#e2e8f0') }}">Stufe {{ wb.wbi }}</div>
+      {% if wb.get('stale') %}<div class="small" style="color:#eab308">Datenstand veraltet ({{ wb.get('date_fmt') or wb.get('date') or '–' }})</div>{% endif %}
+      <div class="small" style="margin-top:4px">Station {{ wb.get('station_name') or 'Nürnberg' }} ({{ wb.get('station_id') or '3668' }}) · {{ wb.get('distance_km') or 8.2 }} km</div>
+      <div class="small" style="color:#94a3b8">Datum {{ wb.get('date_fmt') or wb.get('date') or '–' }}{% if wb.get('termin') %} · {{ wb.get('termin') }}{% endif %}</div>
+      {% if wb.get('forecast') and wb.forecast|length > 1 %}
+      <div class="small" style="margin-top:4px;color:#94a3b8">Vorhersage:
+        {% for v in wb.forecast %}{% if loop.index0 == 0 %}heute {{ v }}{% else %}+{{ loop.index0 }}:{{ v }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}
+      </div>
+      {% endif %}
+    {% else %}
+      <div class="small">Keine WBI-Daten</div>
+    {% endif %}
+    {% if wbi_history is defined and wbi_history %}
+      <div class="small" style="margin-top:6px;color:#64748b;word-break:break-word">
+        Verlauf:
+        {% for h in wbi_history[-14:] %}{{ h.t }}:{{ h.v }}{% if not loop.last %} · {% endif %}{% endfor %}
+      </div>
+    {% endif %}
+    <div class="small" style="margin-top:6px;color:#64748b">Quelle: DWD WBI Forecast</div>
+    <div class="small" style="color:{{ dwd_wbi.color if dwd_wbi is defined else '#94a3b8' }}">{{ dwd_wbi.updated if dwd_wbi is defined else '' }}</div>
+  </div>
+  <div class="card full" style="padding:10px;text-align:center">'''
+
+src = must_replace(
+    src,
+    '''    <div class="small" style="color:{{ wetter.color }}">{{ wetter.updated }}</div>
+  </div>
+  <div class="card full" style="padding:10px;text-align:center">''',
+    UI_CARDS,
+    "PAGE3 DWD cards",
+)
+
+# --- 7) page3 route: expose dwd_mesh_status ---
+src = must_replace(
+    src,
+    '    data_store["odl_mesh_status"] = last_odl_mesh_status\n'
+    '    data_store["mesh_weather_status"] = {\n'
+    '        "auto": last_mesh_weather_auto,\n'
+    '        "manual": last_mesh_weather_manual,\n'
+    '    }\n'
+    '    return render_template_string(PAGE3, **data_store)\n',
+    '    data_store["odl_mesh_status"] = last_odl_mesh_status\n'
+    '    data_store["dwd_mesh_status"] = last_dwd_mesh_status\n'
+    '    data_store["mesh_weather_status"] = {\n'
+    '        "auto": last_mesh_weather_auto,\n'
+    '        "manual": last_mesh_weather_manual,\n'
+    '    }\n'
+    '    return render_template_string(PAGE3, **data_store)\n',
+    "page3 dwd_mesh_status",
+)
+
+# --- 8) Startup loads ---
+src = must_replace(
+    src,
+    '    load_outage_history()\n',
+    '    load_outage_history()\n'
+    '    load_wbi_history()\n'
+    '    load_dwd_mesh_status()\n',
+    "startup load DWD",
+)
+
+PATH.write_text(src, encoding="utf-8")
+print("OK: DWD v3 gepatcht ->", PATH)
