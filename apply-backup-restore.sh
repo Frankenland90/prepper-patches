@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Pin to commit that contains verified bakRestore patch chunks
-COMMIT="2adeef21629cbcbfc7aaa55dbfe3c42bb952960a"
+COMMIT="main"
 BASE="https://raw.githubusercontent.com/Frankenland90/prepper-patches/${COMMIT}"
 APP="/home/fmg/prepper-dashboard"
 TOOLS="$APP/tools"
