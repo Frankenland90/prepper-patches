@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+"""Backup versioning + safe restore UI/API. Idempotent /* bakRestore */."""
+from pathlib import Path
+import sys, base64
+
+PATH = Path(sys.argv[1] if len(sys.argv) > 1 else "/home/fmg/prepper-dashboard/dashboard.py")
+src = PATH.read_text(encoding="utf-8")
+if "/* bakRestore */" in src:
+    print("bakRestore schon drin — nichts geaendert.")
+    raise SystemExit(0)
+
+
+def must_replace(text, old, new, label):
+    n = text.count(old)
+    if n != 1:
+        raise SystemExit("STOP %s: Anker %sx (erwartet 1)." % (label, n))
+    return text.replace(old, new, 1)
+
+
+def D(s):
+    return base64.b64decode(s).decode("utf-8")
+
+
+PAIRS = [
+('list_prepper_backups', ('ZGVmIGxpc3RfcHJlcHBlcl9iYWNrdXBzKCk6CiAgICBpbXBvcnQgZ2xvYiwganNvbiwgb3MKICAg'+
+    'IGRlc3QgPSAiL2hvbWUvZm1nL3ByZXBwZXItYmFja3VwcyIKICAgIHJvd3MgPSBbXQogICAgZm9y'+
+    'IG1ldGEgaW4gZ2xvYi5nbG9iKG9zLnBhdGguam9pbihkZXN0LCAicHJlcHBlci0qLmpzb24iKSk6'+
+    'CiAgICAgICAgdHJ5OgogICAgICAgICAgICB3aXRoIG9wZW4obWV0YSkgYXMgZjoKICAgICAgICAg'+
+    'ICAgICAgIGQgPSBqc29uLmxvYWQoZikKICAgICAgICBleGNlcHQgRXhjZXB0aW9uOgogICAgICAg'+
+    'ICAgICBjb250aW51ZQogICAgICAgIHJvd3MuYXBwZW5kKGQpCiAgICByb3dzLnNvcnQoa2V5PWxh'+
+    'bWJkYSB4OiB4LmdldCgiaXNvIikgb3IgIiIsIHJldmVyc2U9VHJ1ZSkKICAgIHJvd3MgPSByb3dz'+
+    'WzoxMF0KICAgIGlmIHJvd3M6CiAgICAgICAgcm93c1stMV1bIm5leHRfcm90YXRlIl0gPSBUcnVl'+
