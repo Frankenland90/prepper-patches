@@ -1,47 +1,77 @@
 #!/usr/bin/env python3
 """ADSB-Verlauf: 14 Tage speichern + Titel. /* adsbHist14 */."""
 from pathlib import Path
+import re
 import sys
 
 PATH = Path(sys.argv[1] if len(sys.argv) > 1 else "/home/fmg/prepper-dashboard/dashboard.py")
 src = PATH.read_text(encoding="utf-8")
-if "/* adsbHist14 */" in src:
+if "/* adsbHist14 */" in src or "cut = now_ts - 14 * 24 * 3600" in src:
     print("adsbHist14 schon drin — nichts geaendert.")
     raise SystemExit(0)
 
-def must(old, new, label):
+changed = []
+
+def one(old, new, label, required=True):
     global src
     n = src.count(old)
-    if n != 1:
+    if n == 1:
+        src = src.replace(old, new, 1)
+        changed.append(label)
+        return True
+    if required:
         raise SystemExit("STOP %s: Anker %sx (erwartet 1)." % (label, n))
-    src = src.replace(old, new, 1)
+    return False
 
-must(
-    '    """Live-Lage vom lokalen tar1090/readsb + 7-Tage-Verlauf."""\n',
-    '    """Live-Lage vom lokalen tar1090/readsb + 14-Tage-Verlauf. /* adsbHist14 */"""\n',
-    "docstring",
-)
-must(
-    "        # Verlauf speichern (max alle 10 min ein Punkt, 7 Tage)\n",
-    "        # Verlauf speichern (max alle 10 min ein Punkt, 14 Tage) /* adsbHist14 */\n",
-    "comment",
-)
-must(
+# critical
+one(
     "        cut = now_ts - 7 * 24 * 3600\n",
-    "        cut = now_ts - 14 * 24 * 3600\n",
+    "        cut = now_ts - 14 * 24 * 3600  # /* adsbHist14 */\n",
     "cut 14d",
+    True,
 )
-# 14d * 24h * 6 Punkte/h = 2016 → etwas Puffer
-must(
+one(
     "                json.dump(hist[-1200:], f)\n",
     "                json.dump(hist[-2200:], f)\n",
     "cap 2200",
-)
-must(
-    '  <div class="title">Verlauf 7 Tage · Erkennung</div>\n',
-    '  <div class="title">Verlauf 14 Tage · Erkennung</div>\n',
-    "title",
+    True,
 )
 
+# optional cosmetics
+one(
+    "        # Verlauf speichern (max alle 10 min ein Punkt, 7 Tage)\n",
+    "        # Verlauf speichern (max alle 10 min ein Punkt, 14 Tage) /* adsbHist14 */\n",
+    "comment",
+    False,
+)
+one(
+    '  <div class="title">Verlauf 7 Tage · Erkennung</div>\n',
+    '  <div class="title">Verlauf 14 Tage · Erkennung</div>\n',
+    "title7",
+    False,
+)
+if "Verlauf 14 Tage" not in src and "Verlauf 7 Tage" in src:
+    src2, n = re.subn(
+        r'(<div class="title">Verlauf )7( Tage)',
+        r"\g<1>14\2",
+        src,
+        count=1,
+    )
+    if n == 1:
+        src = src2
+        changed.append("title-re")
+
+for old in (
+    '    """Live-Lage vom lokalen tar1090/readsb + 7-Tage-Verlauf."""\n',
+    '    """Live-Lage vom lokalen tar1090/readsb + 14-Tage-Verlauf."""\n',
+):
+    if one(
+        old,
+        '    """Live-Lage vom lokalen tar1090/readsb + 14-Tage-Verlauf. /* adsbHist14 */"""\n',
+        "docstring",
+        False,
+    ):
+        break
+
 PATH.write_text(src, encoding="utf-8")
-print("OK adsbHist14 ->", PATH)
+print("OK adsbHist14 ->", PATH, "changed:", ",".join(changed))
