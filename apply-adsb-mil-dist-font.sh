@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-COMMIT="${COMMIT:-PIN}"
+COMMIT="${COMMIT:-ee9d02ca171e580ab5aedfe72ceb649df6cf8890}"
 BASE="https://raw.githubusercontent.com/Frankenland90/prepper-patches/${COMMIT}"
 DASH="/home/fmg/prepper-dashboard/dashboard.py"
 curl -fsSL "$BASE/patch-adsb-mil-dist-font.py" -o /tmp/patch-adsb-mil-dist-font.py
