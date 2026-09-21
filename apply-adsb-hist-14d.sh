@@ -1,9 +1,15 @@
 #!/bin/bash
 set -euo pipefail
-COMMIT="${COMMIT:-main}"
+COMMIT="${COMMIT:-3acc932aa31607ddd7a4832ed37ddae8f65cbd6e}"
 BASE="https://raw.githubusercontent.com/Frankenland90/prepper-patches/${COMMIT}"
 DASH="/home/fmg/prepper-dashboard/dashboard.py"
 curl -fsSL "$BASE/patch-adsb-hist-14d.py" -o /tmp/patch-adsb-hist-14d.py
+if ! grep -q 'def one(' /tmp/patch-adsb-hist-14d.py; then
+  echo "FAIL: alte patch-adsb-hist-14d.py geladen (kein def one). COMMIT=$COMMIT"
+  head -8 /tmp/patch-adsb-hist-14d.py
+  exit 1
+fi
+wc -c /tmp/patch-adsb-hist-14d.py
 python3 /tmp/patch-adsb-hist-14d.py "$DASH"
 python3 -m py_compile "$DASH"
 sudo systemctl restart prepper-dashboard || true
