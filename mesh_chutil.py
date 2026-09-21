@@ -10,9 +10,13 @@ from pathlib import Path
 BASE = Path("/home/fmg/prepper-dashboard")
 HIST_MAX = 2200  # ~14 Tage à 10 min
 SAMPLE_MIN_GAP = 300  # Sekunden
+THRESH_YELLOW = 25.0
+THRESH_RED = 40.0
+
 
 def now_str():
     return datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+
 
 def _node_key(nid) -> str:
     if nid is None:
@@ -27,11 +31,25 @@ def _node_key(nid) -> str:
             return s
     return s if s.startswith("!") else f"!{s}"
 
+
+def _last_heard_ts(info):
+    if not isinstance(info, dict):
+        return None
+    for k in ("lastHeard", "last_heard", "lastheard"):
+        v = info.get(k)
+        if v is None:
+            continue
+        try:
+            return float(v)
+        except Exception:
+            pass
+    return None
+
+
 def pick_local_metrics(iface, my_ids=None):
-    """Eigene Node-DeviceMetrics aus iface.nodes."""
+    """Eigene Node-DeviceMetrics aus iface.nodes (+ nodedb, lastHeard)."""
     nodes = getattr(iface, "nodes", None) or {}
     my_ids = {_node_key(x) for x in (my_ids or []) if x}
-    # myInfo.my_node_num
     try:
         mi = getattr(iface, "myInfo", None)
         num = getattr(mi, "my_node_num", None) if mi is not None else None
@@ -40,8 +58,12 @@ def pick_local_metrics(iface, my_ids=None):
         if num is not None:
             my_ids.add(_node_key(num))
             my_ids.add(_node_key(f"!{int(num):08x}"))
+        # nodedb_count aus myInfo falls vorhanden
+        ndb_mi = getattr(mi, "nodedb_count", None) if mi is not None else None
+        if ndb_mi is None and isinstance(mi, dict):
+            ndb_mi = mi.get("nodedb_count")
     except Exception:
-        pass
+        ndb_mi = None
 
     candidates = []
     for nid, info in nodes.items():
@@ -49,7 +71,6 @@ def pick_local_metrics(iface, my_ids=None):
             continue
         dm = info.get("deviceMetrics") or info.get("device_metrics") or {}
         if not isinstance(dm, dict):
-            # protobuf-like
             try:
                 dm = {
                     "channelUtilization": getattr(dm, "channelUtilization", None),
@@ -62,33 +83,57 @@ def pick_local_metrics(iface, my_ids=None):
             continue
         key = _node_key(nid)
         is_local = key in my_ids or key.lstrip("!") in {x.lstrip("!") for x in my_ids}
-        candidates.append((is_local, key, float(ch), float(dm.get("airUtilTx") or 0)))
+        lh = _last_heard_ts(info)
+        candidates.append((is_local, key, float(ch), float(dm.get("airUtilTx") or 0), lh, info))
 
     if not candidates:
         return None
-    # bevorzugt lokal
     locals_ = [c for c in candidates if c[0]]
     pick = locals_[0] if locals_ else max(candidates, key=lambda c: c[2])
+    nodedb = int(ndb_mi) if ndb_mi is not None else len(nodes)
+    lh = pick[4]
+    heard_sec = None
+    if lh is not None:
+        if lh > 1e12:  # ms
+            heard_sec = max(0, int(time.time() - lh / 1000.0))
+        elif lh > 1e8:  # unix seconds
+            heard_sec = max(0, int(time.time() - lh))
     return {
         "node": pick[1],
         "ch_util": round(pick[2], 2),
         "air_tx": round(pick[3], 3),
         "local": bool(pick[0]),
+        "nodedb": nodedb,
+        "heard_sec": heard_sec,
     }
+
 
 def load_hist(path: Path):
     try:
-        data = json.loads(path.read_text() or "[]")
+        data = json.loads(Path(path).read_text() or "[]")
         return data if isinstance(data, list) else []
     except Exception:
         return []
+
 
 def append_sample(path: Path, sample: dict, min_gap: int = SAMPLE_MIN_GAP):
     path = Path(path)
     hist = load_hist(path)
     now_ts = time.time()
     if hist and now_ts - float(hist[-1].get("ts") or 0) < min_gap:
-        return False, hist[-1]
+        last = hist[-1]
+        # Meta nachziehen (nodedb/heard), ohne neuen Punkt
+        changed = False
+        for k in ("nodedb", "heard_sec"):
+            if last.get(k) is None and sample.get(k) is not None:
+                last[k] = sample.get(k)
+                changed = True
+        if changed:
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(hist, ensure_ascii=False))
+            tmp.replace(path)
+            return True, last
+        return False, last
     point = {
         "ts": now_ts,
         "t": datetime.now().strftime("%d.%m. %H:%M"),
@@ -96,6 +141,8 @@ def append_sample(path: Path, sample: dict, min_gap: int = SAMPLE_MIN_GAP):
         "air_tx": sample.get("air_tx"),
         "node": sample.get("node") or "",
         "local": bool(sample.get("local")),
+        "nodedb": sample.get("nodedb"),
+        "heard_sec": sample.get("heard_sec"),
     }
     hist.append(point)
     cut = now_ts - 14 * 24 * 3600
@@ -104,6 +151,7 @@ def append_sample(path: Path, sample: dict, min_gap: int = SAMPLE_MIN_GAP):
     tmp.write_text(json.dumps(hist, ensure_ascii=False))
     tmp.replace(path)
     return True, point
+
 
 def sample_and_store(iface, path, my_ids=None, min_gap: int = SAMPLE_MIN_GAP):
     if iface is None:
@@ -114,13 +162,92 @@ def sample_and_store(iface, path, my_ids=None, min_gap: int = SAMPLE_MIN_GAP):
     wrote, point = append_sample(Path(path), sample, min_gap=min_gap)
     return {"ok": True, "wrote": wrote, "current": point, "sample": sample}
 
+
+def _window(hist, hours: float):
+    now_ts = time.time()
+    return [p for p in hist if now_ts - float(p.get("ts") or 0) <= hours * 3600]
+
+
+def _avg_peak(win):
+    vals = []
+    for p in win:
+        v = p.get("ch_util")
+        if v is None:
+            continue
+        try:
+            vals.append(float(v))
+        except Exception:
+            pass
+    if not vals:
+        return None, None
+    return round(sum(vals) / len(vals), 2), round(max(vals), 2)
+
+
+def threshold_streak(hist, threshold: float = THRESH_YELLOW):
+    """Wenn aktueller Wert >= threshold: Start der durchgehenden Überschreitung (rückwärts)."""
+    if not hist:
+        return None
+    cur = hist[-1]
+    try:
+        ch = float(cur.get("ch_util"))
+    except Exception:
+        return None
+    if ch < threshold:
+        return None
+    start = cur
+    for p in reversed(hist):
+        try:
+            v = float(p.get("ch_util"))
+        except Exception:
+            break
+        if v < threshold:
+            break
+        start = p
+    since_ts = float(start.get("ts") or 0)
+    sec = max(0, int(time.time() - since_ts))
+    return {
+        "ch": ch,
+        "threshold": threshold,
+        "since_t": start.get("t") or "",
+        "since_ts": since_ts,
+        "sec": sec,
+        "level": "red" if ch >= THRESH_RED else "yellow",
+    }
+
+
+def fmt_duration(sec):
+    if sec is None:
+        return ""
+    sec = int(sec)
+    if sec < 60:
+        return f"{sec} s"
+    if sec < 3600:
+        return f"{sec // 60} min"
+    h = sec // 3600
+    m = (sec % 3600) // 60
+    if h < 48:
+        return f"{h} h {m} min" if m else f"{h} h"
+    return f"{h // 24} d {h % 24} h"
+
+
 def hist_payload(path: Path, hours: float = 24):
     hist = load_hist(path)
     now_ts = time.time()
-    win = [p for p in hist if now_ts - float(p.get("ts") or 0) <= hours * 3600]
+    win = _window(hist, hours)
     if not win and hist:
         win = hist[-min(len(hist), 200):]
     cur = hist[-1] if hist else None
+    w24 = _window(hist, 24)
+    w7 = _window(hist, 24 * 7)
+    avg24, peak24 = _avg_peak(w24)
+    avg7, peak7 = _avg_peak(w7)
+    streak = threshold_streak(hist, THRESH_YELLOW)
+    hint = None
+    if streak:
+        hint = (
+            f"Kanal über {int(streak['threshold'])} % seit {streak['since_t'] or '?'} "
+            f"({fmt_duration(streak['sec'])})"
+        )
     return {
         "ok": True,
         "at": now_str(),
@@ -129,4 +256,12 @@ def hist_payload(path: Path, hours: float = 24):
         "hist_t": [p.get("t") for p in win],
         "hist_ch": [p.get("ch_util") for p in win],
         "hist_tx": [p.get("air_tx") for p in win],
+        "avg_24h": avg24,
+        "peak_24h": peak24,
+        "avg_7d": avg7,
+        "peak_7d": peak7,
+        "hint": hint,
+        "streak": streak,
+        "nodedb": (cur or {}).get("nodedb"),
+        "heard_sec": (cur or {}).get("heard_sec"),
     }

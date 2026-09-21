@@ -24,6 +24,13 @@ body{margin:0;font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;
 .grid{display:grid;gap:12px}
 @media(min-width:900px){.grid{grid-template-columns:1fr 1fr}}
 .chart-wrap{height:160px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-size:0.8rem;margin:6px 0 4px;color:#cbd5e1}
+.stats b{color:#e2e8f0;font-weight:600}
+.hint{margin-top:8px;padding:8px 10px;border-radius:8px;font-size:0.8rem}
+.hint.yellow{background:#422006;color:#fde68a;border:1px solid #a16207}
+.hint.red{background:#450a0a;color:#fecaca;border:1px solid #b91c1c}
+.kv{display:grid;grid-template-columns:140px 1fr;gap:4px 10px;margin-top:6px;font-size:0.9rem}
+.kv .k{color:#94a3b8}
 </style></head><body>
 <div class="nav">
   <a href="/">Lage</a> <a href="/energie">Energie</a> <a href="/lokale-energie">Lokale Energie</a>
@@ -39,13 +46,19 @@ body{margin:0;font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;
 <div style="margin:12px 0;padding-bottom:12px;border-bottom:1px solid #334155">
 <div><b>{{ m.name }}</b> · <span style="color:{{ m.color }}">{{ m.label }}</span></div>
 <div class="small">{{ m.host }}:4403</div>
-<div>TCP: {{ "offen" if m.tcp else "zu" }}</div>
-<div>Dienst: {% if m.svc_ok %}aktiv{% elif m.svc_ok is none %}–{% else %}aus{% endif %}</div>
-<div>Stand: {{ m.at or "–" }}</div>
-<div>CLOSE-WAIT: {{ m.cw if m.cw is defined else m.closewait }}</div>
+<div class="kv">
+  <div class="k">TCP</div><div><b>{{ "offen" if m.tcp else "zu" }}</b></div>
+  <div class="k">Dienst</div>
+  <div>{% if m.svc_ok %}aktiv{% elif m.svc_ok is none %}–{% else %}aus{% endif %}</div>
+  <div class="k">Stand</div><div>{{ m.at or "–" }}</div>
+  <div class="k">CLOSE-WAIT</div><div>{{ m.cw if m.cw is defined else m.closewait }}</div>
+  <div class="k">Node-DB</div><div>{% if m.nodedb is not none %}{{ m.nodedb }}{% else %}–{% endif %}</div>
+  <div class="k">lastHeard</div>
+  <div>{% if m.heard_sec is not none %}{{ m.heard_sec }} s{% else %}–{% endif %}</div>
+</div>
 </div>
 {% endfor %}
-<div class="small">Grün = läuft · Gelb = Port offen / Dienst aus · Rot = offline</div>
+<div class="small">Grün = läuft · Gelb = Port offen / Dienst aus · Rot = offline · Node-DB/lastHeard aus Telemetrie</div>
 </div>
 
 <div class="grid">
@@ -53,6 +66,13 @@ body{margin:0;font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;
     <div class="title">Kanalauslastung · Mesh 1</div>
     <div class="big" style="color:{{ c1.color }}">{% if c1.ch is not none %}{{ c1.ch }} %{% else %}–{% endif %}</div>
     <div class="small">Air-TX {% if c1.tx is not none %}{{ c1.tx }} %{% else %}–{% endif %} · {{ c1.node or "" }} · {{ c1.at or "noch keine Samples" }}</div>
+    <div class="stats">
+      <div>Mittel 24h <b>{% if c1.avg_24h is not none %}{{ c1.avg_24h }} %{% else %}–{% endif %}</b></div>
+      <div>Peak 24h <b>{% if c1.peak_24h is not none %}{{ c1.peak_24h }} %{% else %}–{% endif %}</b></div>
+      <div>Mittel 7d <b>{% if c1.avg_7d is not none %}{{ c1.avg_7d }} %{% else %}–{% endif %}</b></div>
+      <div>Peak 7d <b>{% if c1.peak_7d is not none %}{{ c1.peak_7d }} %{% else %}–{% endif %}</b></div>
+    </div>
+    {% if c1.hint %}<div class="hint {{ c1.hint_level }}">{{ c1.hint }}</div>{% endif %}
     <div class="chart-wrap"><canvas id="ch1"></canvas></div>
     <div class="small">24h · Telemetrie DeviceMetrics · 5–10 min</div>
   </div>
@@ -60,6 +80,13 @@ body{margin:0;font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;
     <div class="title">Kanalauslastung · Mesh 2</div>
     <div class="big" style="color:{{ c2.color }}">{% if c2.ch is not none %}{{ c2.ch }} %{% else %}–{% endif %}</div>
     <div class="small">Air-TX {% if c2.tx is not none %}{{ c2.tx }} %{% else %}–{% endif %} · {{ c2.node or "" }} · {{ c2.at or "noch keine Samples" }}</div>
+    <div class="stats">
+      <div>Mittel 24h <b>{% if c2.avg_24h is not none %}{{ c2.avg_24h }} %{% else %}–{% endif %}</b></div>
+      <div>Peak 24h <b>{% if c2.peak_24h is not none %}{{ c2.peak_24h }} %{% else %}–{% endif %}</b></div>
+      <div>Mittel 7d <b>{% if c2.avg_7d is not none %}{{ c2.avg_7d }} %{% else %}–{% endif %}</b></div>
+      <div>Peak 7d <b>{% if c2.peak_7d is not none %}{{ c2.peak_7d }} %{% else %}–{% endif %}</b></div>
+    </div>
+    {% if c2.hint %}<div class="hint {{ c2.hint_level }}">{{ c2.hint }}</div>{% endif %}
     <div class="chart-wrap"><canvas id="ch2"></canvas></div>
     <div class="small">24h · Telemetrie DeviceMetrics · 5–10 min</div>
   </div>
@@ -105,6 +132,9 @@ def _card(path, hours=24):
     empty = {
         "ch": None, "tx": None, "node": "", "at": "", "color": "#94a3b8",
         "hist_t": [], "hist_ch": [], "hist_tx": [],
+        "avg_24h": None, "peak_24h": None, "avg_7d": None, "peak_7d": None,
+        "hint": None, "hint_level": "",
+        "nodedb": None, "heard_sec": None,
     }
     if mesh_chutil is None:
         return empty
@@ -112,6 +142,7 @@ def _card(path, hours=24):
         p = mesh_chutil.hist_payload(Path(path), hours=hours)
         cur = p.get("current") or {}
         ch = cur.get("ch_util")
+        streak = p.get("streak") or {}
         return {
             "ch": ch,
             "tx": cur.get("air_tx"),
@@ -121,6 +152,14 @@ def _card(path, hours=24):
             "hist_t": p.get("hist_t") or [],
             "hist_ch": p.get("hist_ch") or [],
             "hist_tx": p.get("hist_tx") or [],
+            "avg_24h": p.get("avg_24h"),
+            "peak_24h": p.get("peak_24h"),
+            "avg_7d": p.get("avg_7d"),
+            "peak_7d": p.get("peak_7d"),
+            "hint": p.get("hint"),
+            "hint_level": streak.get("level") or "",
+            "nodedb": p.get("nodedb") if p.get("nodedb") is not None else cur.get("nodedb"),
+            "heard_sec": p.get("heard_sec") if p.get("heard_sec") is not None else cur.get("heard_sec"),
         }
     except Exception:
         return empty
@@ -131,10 +170,21 @@ def register_funk(app):
     def page_funk():
         from dashboard import fetch_mesh_status
         st = fetch_mesh_status() or {}
-        items = [x for x in (st.get("m1"), st.get("m2")) if x]
         base = Path("/home/fmg/prepper-dashboard")
         c1 = _card(base / "mesh1_chutil.json")
         c2 = _card(base / "mesh2_chutil.json")
+        items = []
+        for key, card in (("m1", c1), ("m2", c2)):
+            m = st.get(key)
+            if not m:
+                continue
+            m = dict(m)
+            if m.get("nodedb") is None:
+                m["nodedb"] = card.get("nodedb")
+            # Prefer live telemetry heard_sec from sample; keep status heard_sec if set
+            if m.get("heard_sec") is None:
+                m["heard_sec"] = card.get("heard_sec")
+            items.append(m)
         return render_template_string(PAGE, items=items, c1=c1, c2=c2)
 
     @app.route("/api/funk/chutil")
