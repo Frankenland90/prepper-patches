@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-COMMIT="${COMMIT:-3acc932aa31607ddd7a4832ed37ddae8f65cbd6e}"
+COMMIT="${COMMIT:-0b2776977fcd08e5ce556eaf4a62c377a4b2c5dd}"
 BASE="https://raw.githubusercontent.com/Frankenland90/prepper-patches/${COMMIT}"
 DASH="/home/fmg/prepper-dashboard/dashboard.py"
 curl -fsSL "$BASE/patch-adsb-hist-14d.py" -o /tmp/patch-adsb-hist-14d.py
