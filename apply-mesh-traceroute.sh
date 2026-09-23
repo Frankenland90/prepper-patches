@@ -13,8 +13,8 @@ curl -fsSL "$BASE/funk_health.py" -o /tmp/funk_health.py
 curl -fsSL "$BASE/apply-mesh-traceroute.sh" -o /tmp/apply-mesh-traceroute.sh.self 2>/dev/null || true
 
 for f in /tmp/mesh_traceroute.py /tmp/patch-mesh-traceroute-bridge.py /tmp/funk_health.py; do
-  if ! grep -qE 'meshTrace|meshTraceBridge|meshTraceFunk|!4191a2ef' "$f"; then
-    echo "FAIL: $f ohne meshTrace/!4191a2ef Marker. COMMIT=$COMMIT"
+  if ! grep -qE 'meshTrace|meshTraceBridge|meshTraceFunk|!fbc48dcb' "$f"; then
+    echo "FAIL: $f ohne meshTrace/!fbc48dcb Marker. COMMIT=$COMMIT"
     head -8 "$f"
     exit 1
   fi
@@ -48,9 +48,9 @@ sleep 2
 systemctl is-active mesh-bridge.service prepper-dashboard || true
 
 echo "--- Marker ---"
-grep -nE 'meshTrace|traceroute_worker|TRACE_DEST|!4191a2ef' "$DASH_DIR/mesh_traceroute.py" | head -15
-grep -nE 'meshTraceBridge|traceroute_worker|TRACE_DEST|!4191a2ef|/traceroute' "$DASH_DIR/mesh_bridge.py" | head -25
-grep -nE 'meshTraceFunk|Trace ·|tr1|trace-fail|!4191a2ef' "$DASH_DIR/funk_health.py" | head -20
+grep -nE 'meshTrace|traceroute_worker|TRACE_DEST|!fbc48dcb' "$DASH_DIR/mesh_traceroute.py" | head -15
+grep -nE 'meshTraceBridge|traceroute_worker|TRACE_DEST|!fbc48dcb|/traceroute' "$DASH_DIR/mesh_bridge.py" | head -25
+grep -nE 'meshTraceFunk|Trace ·|tr1|trace-fail|!fbc48dcb' "$DASH_DIR/funk_health.py" | head -20
 
 echo ""
 echo "OK mesh-traceroute applied COMMIT=$COMMIT"
