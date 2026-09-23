@@ -29,27 +29,32 @@ wc -c /tmp/mesh_chutil.py /tmp/funk_health.py /tmp/mesh_reply_watch.py \
   /tmp/patch-mesh-hang-bridges.py /tmp/mesh_hang_watchdog.py \
   /tmp/mesh-hang-watchdog.service /tmp/mesh-hang-watchdog.timer
 
-# Backups
-for n in mesh_chutil.py funk_health.py mesh_bridge.py mesh_bridge_bayern.py \
-         mesh_ping_reply.py mesh_ping_reply2.py; do
-  [ -f "$DASH_DIR/$n" ] && cp -a "$DASH_DIR/$n" "$DASH_DIR/$n.bak-meshhang-$TS" || true
-done
-
+# Helpers + watchdog installieren
 install -m 0644 /tmp/mesh_chutil.py "$DASH_DIR/mesh_chutil.py"
 install -m 0644 /tmp/funk_health.py "$DASH_DIR/funk_health.py"
 install -m 0644 /tmp/mesh_reply_watch.py "$DASH_DIR/mesh_reply_watch.py"
 install -m 0644 /tmp/mesh_hang_watchdog.py "$DASH_DIR/mesh_hang_watchdog.py"
 install -m 0755 /tmp/patch-mesh-hang-bridges.py "$DASH_DIR/patch-mesh-hang-bridges.py"
 
-# Falls letzter Apply kaputt ging: neueste bak-meshhang wiederherstellen
+# Bridges/Ping: zuerst sauberes bak (ohne mesh_reply_watch), dann Backup, dann Patch
 for n in mesh_bridge.py mesh_bridge_bayern.py mesh_ping_reply.py mesh_ping_reply2.py mesh_ping_reply_bayern.py; do
-  latest=$(ls -1t "$DASH_DIR/$n.bak-meshhang-"* 2>/dev/null | head -1 || true)
-  if [ -n "$latest" ]; then
-    if ! python3 -m py_compile "$DASH_DIR/$n" 2>/dev/null; then
-      echo "RESTORE broken $n from $latest"
-      cp -a "$latest" "$DASH_DIR/$n"
+  clean=""
+  for bak in $(ls -1t "$DASH_DIR/$n.bak-meshhang-"* 2>/dev/null); do
+    if ! grep -q 'mesh_reply_watch' "$bak" 2>/dev/null; then
+      clean=$bak
+      break
     fi
+  done
+  if [ -n "$clean" ]; then
+    echo "RESTORE $n <- $clean"
+    cp -a "$clean" "$DASH_DIR/$n"
   fi
+  [ -f "$DASH_DIR/$n" ] && cp -a "$DASH_DIR/$n" "$DASH_DIR/$n.bak-meshhang-$TS" || true
+done
+
+# chutil/funk ebenfalls bak
+for n in mesh_chutil.py funk_health.py; do
+  [ -f "$DASH_DIR/$n" ] && cp -a "$DASH_DIR/$n" "$DASH_DIR/$n.bak-meshhang-$TS" || true
 done
 
 python3 /tmp/patch-mesh-hang-bridges.py "$DASH_DIR"

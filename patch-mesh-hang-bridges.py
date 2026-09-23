@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Beide Bridges + Ping-Reply: reply_watch note_rx/note_tx. # meshHangBridge / # meshHangPing"""
+"""Reply-watch via exact anchors (pingName / Pong-Trigger). # meshHangBridge / # meshHangPing"""
 from __future__ import annotations
 
 import re
@@ -11,25 +11,20 @@ MARK_P = "meshHangPing"
 
 
 def _ensure_import(src: str, mod: str, mark: str) -> str:
-    if f"import {mod}" in src:
+    if re.search(r"(?m)^import " + re.escape(mod) + r"\b", src):
         return src
-    for anchor in (
-        "import mesh_node_label",
-        "import mesh_chutil",
-        "from pathlib import Path\n",
+    # Only module-level imports (start of line) — never inside try/helpers
+    for pat in (
+        r"(?m)^(import mesh_node_label[^\n]*\n)",
+        r"(?m)^(import mesh_chutil[^\n]*\n)",
+        r"(?m)^(from pathlib import Path\n)",
     ):
-        if anchor in src:
-            if anchor.endswith("\n"):
-                return src.replace(anchor, anchor + f"import {mod}  # {mark}\n", 1)
-            idx = src.find(anchor)
-            end = src.find("\n", idx)
-            if end < 0:
-                end = len(src)
-            line = src[idx:end]
-            return src.replace(line, line + f"\nimport {mod}  # {mark}", 1)
-    m = re.search(r"(^(?:import |from ).+\n)+", src, re.M)
-    if m:
-        return src[: m.end()] + f"import {mod}  # {mark}\n" + src[m.end() :]
+        m = re.search(pat, src)
+        if m:
+            return src[: m.end()] + f"import {mod}  # {mark}\n" + src[m.end() :]
+    block = re.search(r"(?m)^(?:(?:import |from ).+\n)+", src)
+    if block:
+        return src[: block.end()] + f"import {mod}  # {mark}\n" + src[block.end() :]
     return f"import {mod}  # {mark}\n" + src
 
 
@@ -38,9 +33,7 @@ def _line_indent(line: str) -> str:
 
 
 def _stmt_end_index(src: str, line_start: int) -> int:
-    """Index just after the statement starting at line_start (balances (), [], {})."""
-    i = line_start
-    n = len(src)
+    i, n = line_start, len(src)
     paren = bracket = brace = 0
     in_s = None
     escape = False
@@ -77,95 +70,162 @@ def _stmt_end_index(src: str, line_start: int) -> int:
     return n
 
 
-def _strip_broken_inserts(src: str) -> str:
-    """Remove previous bad one-liner / mid-call inserts."""
+def _strip_note_watch(src: str) -> str:
+    """Remove only mesh_reply_watch inserts (not unrelated try/except)."""
     src = re.sub(
         r'(?m)^[ \t]*try:\s*mesh_reply_watch\.note_(?:rx|tx)\("[^"]+"\)[^\n]*\n'
-        r'[ \t]*except Exception:\s*pass\n',
+        r"[ \t]*except Exception:\s*pass\n",
         "",
         src,
     )
     src = re.sub(
-        r'(?m)^[ \t]*try:\s*\n'
+        r"(?m)^[ \t]*try:\s*\n"
         r'[ \t]+mesh_reply_watch\.note_(?:rx|tx)\("[^"]+"\)[^\n]*\n'
-        r'[ \t]*except Exception:\s*\n'
-        r'[ \t]+pass\n',
+        r"[ \t]*except Exception:\s*\n"
+        r"[ \t]+pass\n",
         "",
         src,
     )
+    if "mesh_reply_watch.note_" not in src:
+        src = re.sub(r"(?m)^import mesh_reply_watch[^\n]*\n", "", src)
     return src
 
 
-def _block(ind: str, lines: list[str]) -> str:
-    return "".join(ind + ln + "\n" for ln in lines)
+def _insert_after_exact_line(
+    src: str, exact_line: str, block_lines: list[str], key_snip: str
+) -> tuple[str, bool]:
+    if key_snip in src:
+        return src, True
+    lines = src.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if line.rstrip("\n") == exact_line.rstrip("\n"):
+            ind = _line_indent(line)
+            block = "".join(ind + ln + "\n" for ln in block_lines)
+            lines.insert(i + 1, block)
+            return "".join(lines), True
+    return src, False
 
 
-def _insert_rx_tx(src: str, mesh_key: str, mark: str) -> tuple[str, bool, bool]:
-    rx_lines = [
-        "try:",
-        f'    mesh_reply_watch.note_rx("{mesh_key}")  # {mark}',
-        "except Exception:",
-        "    pass",
-    ]
-    tx_lines = [
+def _insert_after_substring_line(
+    src: str, substr: str, block_lines: list[str], key_snip: str
+) -> tuple[str, bool]:
+    if key_snip in src:
+        return src, True
+    lines = src.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if substr in line and "mesh_reply_watch" not in line:
+            ind = _line_indent(line)
+            block = "".join(ind + ln + "\n" for ln in block_lines)
+            lines.insert(i + 1, block)
+            return "".join(lines), True
+    return src, False
+
+
+_SEND_PATS = [
+    r"(?m)^[^\n]*\b_iface\.sendText\s*\(",
+    r"(?m)^[^\n]*\biface\.sendText\s*\(",
+    r"(?m)^[^\n]*\binterface\.sendText\s*\(",
+    r"(?m)^[^\n]*\.sendText\s*\(",
+    r"(?m)^[^\n]*\bsend_reply\s*\(",
+]
+
+
+def _find_send_matches(region: str) -> list[re.Match[str]]:
+    found: list[re.Match[str]] = []
+    for pat in _SEND_PATS:
+        found.extend(re.finditer(pat, region))
+    found.sort(key=lambda m: m.start())
+    # de-dupe overlapping same start
+    out: list[re.Match[str]] = []
+    seen: set[int] = set()
+    for m in found:
+        if m.start() in seen:
+            continue
+        seen.add(m.start())
+        out.append(m)
+    return out
+
+
+def _insert_note_tx_after_send(
+    src: str, mesh_key: str, mark: str, *, after_pos: int = 0, before_pos: int | None = None
+) -> tuple[str, bool]:
+    """Insert note_tx after a sendText call. Prefer last send before before_pos (bridges)."""
+    key = f'mesh_reply_watch.note_tx("{mesh_key}")'
+    if key in src:
+        return src, True
+    end = before_pos if before_pos is not None else len(src)
+    if end <= after_pos:
+        return src, False
+    region = src[after_pos:end]
+    matches = _find_send_matches(region)
+    if not matches:
+        return src, False
+    # last send in window (bridges: sendText sits before Pong-Trigger log)
+    m = matches[-1]
+    abs_match = after_pos + m.start()
+    line_start = src.rfind("\n", 0, abs_match) + 1
+    stmt_end = _stmt_end_index(src, line_start)
+    # don't insert past before_pos
+    if before_pos is not None and stmt_end > before_pos:
+        stmt_end = before_pos
+    nl = src.find("\n", line_start)
+    ind = _line_indent(src[line_start : nl if nl >= 0 else len(src)])
+    block_lines = [
         "try:",
         f'    mesh_reply_watch.note_tx("{mesh_key}")  # {mark}',
         "except Exception:",
         "    pass",
     ]
-    ok_rx = f'mesh_reply_watch.note_rx("{mesh_key}")' in src
-    ok_tx = f'mesh_reply_watch.note_tx("{mesh_key}")' in src
-
-    if not ok_rx:
-        for pat in (
-            r"(?m)^[^\n]*Pong-Trigger[^\n]*$",
-            r'(?m)^[^\n]*["\']ping["\'][^\n]*["\']test["\'][^\n]*$',
-            r'(?m)^[^\n]*\bping\b[^\n]*\btest\b[^\n]*$',
-        ):
-            m = re.search(pat, src)
-            if not m:
-                continue
-            line_start = src.rfind("\n", 0, m.start()) + 1
-            end = _stmt_end_index(src, line_start)
-            ind = _line_indent(src[line_start : src.find("\n", line_start)])
-            src = src[:end] + _block(ind, rx_lines) + src[end:]
-            ok_rx = True
-            break
-
-    if not ok_tx:
-        pong = src.find("Pong-Trigger")
-        region_from = pong if pong >= 0 else 0
-        region = src[region_from:]
-        m = re.search(r"(?m)^[^\n]*\.?sendText\s*\(", region)
-        if m:
-            abs_match = region_from + m.start()
-            line_start = src.rfind("\n", 0, abs_match) + 1
-            end = _stmt_end_index(src, line_start)
-            ind = _line_indent(src[line_start : src.find("\n", line_start)])
-            src = src[:end] + _block(ind, tx_lines) + src[end:]
-            ok_tx = True
-
-    return src, ok_rx, ok_tx
+    block = "".join(ind + ln + "\n" for ln in block_lines)
+    return src[:stmt_end] + block + src[stmt_end:], True
 
 
 def patch_bridge(path: Path, mesh_key: str, label: str) -> None:
     if not path.exists():
         print("skip missing", path)
         return
-    src = path.read_text(encoding="utf-8")
-    src = _strip_broken_inserts(src)
-    if (
-        MARK_B in src
-        and f'mesh_reply_watch.note_rx("{mesh_key}")' in src
-        and f'mesh_reply_watch.note_tx("{mesh_key}")' in src
-    ):
-        compile(src, str(path), "exec")
-        path.write_text(src, encoding="utf-8")
-        print(label, "schon gepatcht (bereinigt)")
-        return
-
+    src = _strip_note_watch(path.read_text(encoding="utf-8"))
     src = _ensure_import(src, "mesh_reply_watch", MARK_B)
-    src, ok_rx, ok_tx = _insert_rx_tx(src, mesh_key, MARK_B)
+
+    rx_lines = [
+        "try:",
+        f'    mesh_reply_watch.note_rx("{mesh_key}")  # {MARK_B}',
+        "except Exception:",
+        "    pass",
+    ]
+    ok_rx = False
+    for exact in (
+        '        log("Pong-Trigger:", text, "von", mesh_node_label.label_from_iface(_iface, _from_id(packet)))  # /* pingName */',
+        '        log("Pong-Trigger:", text, "von", _from_id(packet))',
+        '        log("Pong-Trigger:", text, "von", mesh_node_label.label_from_iface(_iface, _from_id(packet)))',
+    ):
+        src, ok = _insert_after_exact_line(
+            src, exact, rx_lines, f'mesh_reply_watch.note_rx("{mesh_key}")'
+        )
+        if ok and f'mesh_reply_watch.note_rx("{mesh_key}")' in src:
+            ok_rx = True
+            break
+    if not ok_rx:
+        src, ok_rx = _insert_after_substring_line(
+            src,
+            "Pong-Trigger:",
+            rx_lines,
+            f'mesh_reply_watch.note_rx("{mesh_key}")',
+        )
+
+    # Bridges: iface.sendText is BEFORE the Pong-Trigger log line
+    pong = src.find("Pong-Trigger")
+    if pong < 0:
+        pong = len(src)
+    # search window: up to ~80 lines before Pong (handler body)
+    window_start = max(0, pong - 4000)
+    src, ok_tx = _insert_note_tx_after_send(
+        src, mesh_key, MARK_B, after_pos=window_start, before_pos=pong
+    )
+    if not ok_tx:
+        # fallback: any sendText in file
+        src, ok_tx = _insert_note_tx_after_send(src, mesh_key, MARK_B, after_pos=0)
+
     compile(src, str(path), "exec")
     path.write_text(src, encoding="utf-8")
     print(f"OK {label} -> {path} rx={ok_rx} tx={ok_tx}")
@@ -179,37 +239,67 @@ def patch_ping_reply(path: Path, mesh_key: str) -> None:
     if not path.exists():
         print("skip missing", path)
         return
-    src = path.read_text(encoding="utf-8")
-    src = _strip_broken_inserts(src)
-    if (
-        MARK_P in src
-        and f'mesh_reply_watch.note_rx("{mesh_key}")' in src
-        and f'mesh_reply_watch.note_tx("{mesh_key}")' in src
-    ):
-        compile(src, str(path), "exec")
-        path.write_text(src, encoding="utf-8")
-        print(path.name, "schon gepatcht (bereinigt)")
-        return
-
+    src = _strip_note_watch(path.read_text(encoding="utf-8"))
     src = _ensure_import(src, "mesh_reply_watch", MARK_P)
-    src, ok_rx, ok_tx = _insert_rx_tx(src, mesh_key, MARK_P)
+
+    rx_lines = [
+        "try:",
+        f'    mesh_reply_watch.note_rx("{mesh_key}")  # {MARK_P}',
+        "except Exception:",
+        "    pass",
+    ]
+
+    ok_rx = False
+    for exact in (
+        "        msg = build_a(packet, from_id, rx, now_hms(), _from_label(interface, from_id))  # /* pingName */",
+        "        msg = build_a(packet, from_id, rx, now_hms())",
+    ):
+        src, ok = _insert_after_exact_line(
+            src, exact, rx_lines, f'mesh_reply_watch.note_rx("{mesh_key}")'
+        )
+        if ok and f'mesh_reply_watch.note_rx("{mesh_key}")' in src:
+            ok_rx = True
+            break
     if not ok_rx:
-        m = re.search(r"(?m)^[^\n]*\b(?:ping|test)\b[^\n]*$", src)
+        src, ok_rx = _insert_after_substring_line(
+            src,
+            "msg = build_a(",
+            rx_lines,
+            f'mesh_reply_watch.note_rx("{mesh_key}")',
+        )
+
+    # reply2 / bayern: no build_a — hook near hops/von or before sendText
+    if f'mesh_reply_watch.note_rx("{mesh_key}")' not in src:
+        for needle in (
+            "Hops %s · von %s",
+            "Hops %s",
+            "von %s",
+            "channelIndex",
+        ):
+            src, ok_rx = _insert_after_substring_line(
+                src, needle, rx_lines, f'mesh_reply_watch.note_rx("{mesh_key}")'
+            )
+            if ok_rx and f'mesh_reply_watch.note_rx("{mesh_key}")' in src:
+                break
+    if f'mesh_reply_watch.note_rx("{mesh_key}")' not in src:
+        # last resort: insert immediately before first sendText
+        m = re.search(r"(?m)^[^\n]*\.sendText\s*\(", src)
         if m:
             line_start = src.rfind("\n", 0, m.start()) + 1
-            end = _stmt_end_index(src, line_start)
             ind = _line_indent(src[line_start : src.find("\n", line_start)])
-            rx_lines = [
-                "try:",
-                f'    mesh_reply_watch.note_rx("{mesh_key}")  # {MARK_P}',
-                "except Exception:",
-                "    pass",
-            ]
-            src = src[:end] + _block(ind, rx_lines) + src[end:]
+            block = "".join(ind + ln + "\n" for ln in rx_lines)
+            src = src[:line_start] + block + src[line_start:]
             ok_rx = True
+
+    src, ok_tx = _insert_note_tx_after_send(src, mesh_key, MARK_P, after_pos=0)
+
     compile(src, str(path), "exec")
     path.write_text(src, encoding="utf-8")
     print(f"OK {path.name} rx={ok_rx} tx={ok_tx}")
+    if not ok_rx:
+        print(f"WARN {path.name}: note_rx fehlt")
+    if not ok_tx:
+        print(f"WARN {path.name}: note_tx fehlt")
 
 
 def main():
