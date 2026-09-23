@@ -6,15 +6,13 @@ import re
 import sys
 from pathlib import Path
 
-MARK_B = "# meshHangBridge"
-MARK_P = "# meshHangPing"
+MARK_B = "meshHangBridge"
+MARK_P = "meshHangPing"
 
 
 def _ensure_import(src: str, mod: str, mark: str) -> str:
-    needle = f"import {mod}"
-    if needle in src:
+    if f"import {mod}" in src:
         return src
-    # Prefer after mesh_node_label / mesh_chutil / pathlib
     for anchor in (
         "import mesh_node_label",
         "import mesh_chutil",
@@ -29,12 +27,9 @@ def _ensure_import(src: str, mod: str, mark: str) -> str:
                 end = len(src)
             line = src[idx:end]
             return src.replace(line, line + f"\nimport {mod}  # {mark}", 1)
-    # Fallback: after first import block
     m = re.search(r"(^(?:import |from ).+\n)+", src, re.M)
     if m:
-        pos = m.end()
-        return src[:pos] + f"import {mod}  # {mark}\n" + src[pos:]
-    # No imports at all — prepend
+        return src[: m.end()] + f"import {mod}  # {mark}\n" + src[m.end() :]
     return f"import {mod}  # {mark}\n" + src
 
 
@@ -42,73 +37,115 @@ def _line_indent(line: str) -> str:
     return line[: len(line) - len(line.lstrip(" \t"))]
 
 
-def _indent_block(block: str, ind: str) -> str:
-    out = []
-    for ln in block.splitlines():
-        if not ln.strip():
-            out.append("")
+def _stmt_end_index(src: str, line_start: int) -> int:
+    """Index just after the statement starting at line_start (balances (), [], {})."""
+    i = line_start
+    n = len(src)
+    paren = bracket = brace = 0
+    in_s = None
+    escape = False
+    while i < n:
+        ch = src[i]
+        if in_s is not None:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == in_s:
+                in_s = None
+            i += 1
             continue
-        # strip existing leading spaces from template, re-indent
-        out.append(ind + ln.lstrip())
-    return "\n".join(out) + "\n"
+        if ch in ("'", '"'):
+            in_s = ch
+            i += 1
+            continue
+        if ch == "(":
+            paren += 1
+        elif ch == ")":
+            paren = max(0, paren - 1)
+        elif ch == "[":
+            bracket += 1
+        elif ch == "]":
+            bracket = max(0, bracket - 1)
+        elif ch == "{":
+            brace += 1
+        elif ch == "}":
+            brace = max(0, brace - 1)
+        elif ch == "\n" and paren == 0 and bracket == 0 and brace == 0:
+            return i + 1
+        i += 1
+    return n
 
 
-def _insert_after_line_containing(src: str, needles, insert: str, label: str) -> tuple[str, bool]:
-    """Insert once after first line matching any needle substring; match indent."""
-    # idempotent: any note_rx/note_tx already for this insert marker
-    marker = None
-    if "note_rx" in insert:
-        marker = "mesh_reply_watch.note_rx"
-    elif "note_tx" in insert:
-        marker = "mesh_reply_watch.note_tx"
-    if marker and marker in src and ("meshHangBridge" in src or "meshHangPing" in src):
-        # still allow if this specific mesh key not yet present — check insert body
-        keybit = None
-        for part in insert.split('"'):
-            if part in ("m1", "m2"):
-                keybit = part
-                break
-        if keybit and f'note_r' in insert:
-            pass
-        if insert.strip().split("\n")[0].strip() in src.replace(" ", ""):
-            # loose
-            pass
-    if "mesh_reply_watch.note_rx" in insert and "mesh_reply_watch.note_rx" in src:
-        # check mesh key
-        import re as _re
-        m = _re.search(r'note_rx\("([^"]+)"', insert)
-        if m and f'note_rx("{m.group(1)}"' in src:
-            return src, True
-    if "mesh_reply_watch.note_tx" in insert and "mesh_reply_watch.note_tx" in src:
-        import re as _re
-        m = _re.search(r'note_tx\("([^"]+)"', insert)
-        if m and f'note_tx("{m.group(1)}"' in src:
-            return src, True
+def _strip_broken_inserts(src: str) -> str:
+    """Remove previous bad one-liner / mid-call inserts."""
+    src = re.sub(
+        r'(?m)^[ \t]*try:\s*mesh_reply_watch\.note_(?:rx|tx)\("[^"]+"\)[^\n]*\n'
+        r'[ \t]*except Exception:\s*pass\n',
+        "",
+        src,
+    )
+    src = re.sub(
+        r'(?m)^[ \t]*try:\s*\n'
+        r'[ \t]+mesh_reply_watch\.note_(?:rx|tx)\("[^"]+"\)[^\n]*\n'
+        r'[ \t]*except Exception:\s*\n'
+        r'[ \t]+pass\n',
+        "",
+        src,
+    )
+    return src
 
-    lines = src.splitlines(keepends=True)
-    for i, line in enumerate(lines):
-        if any(n in line for n in needles):
-            window = "".join(lines[i : min(i + 5, len(lines))])
-            if "mesh_reply_watch.note_" in window and (
-                ("note_rx" in insert and "note_rx" in window)
-                or ("note_tx" in insert and "note_tx" in window)
-            ):
-                return src, True
-            ind = _line_indent(line)
-            # if anchor is an if/for/def that ends with :, indent one level deeper
-            bare = line.rstrip("\n")
-            if bare.rstrip().endswith(":"):
-                # detect indent style
-                step = "    " if "    " in ind or ind == "" else "\t"
-                if ind.startswith("\t"):
-                    step = "\t"
-                child = ind + step
-            else:
-                child = ind
-            block = _indent_block(insert, child)
-            lines.insert(i + 1, block)
-            return "".join(lines), True
-    return src, False
+
+def _block(ind: str, lines: list[str]) -> str:
+    return "".join(ind + ln + "\n" for ln in lines)
+
+
+def _insert_rx_tx(src: str, mesh_key: str, mark: str) -> tuple[str, bool, bool]:
+    rx_lines = [
+        "try:",
+        f'    mesh_reply_watch.note_rx("{mesh_key}")  # {mark}',
+        "except Exception:",
+        "    pass",
+    ]
+    tx_lines = [
+        "try:",
+        f'    mesh_reply_watch.note_tx("{mesh_key}")  # {mark}',
+        "except Exception:",
+        "    pass",
+    ]
+    ok_rx = f'mesh_reply_watch.note_rx("{mesh_key}")' in src
+    ok_tx = f'mesh_reply_watch.note_tx("{mesh_key}")' in src
+
+    if not ok_rx:
+        for pat in (
+            r"(?m)^[^\n]*Pong-Trigger[^\n]*$",
+            r'(?m)^[^\n]*["\']ping["\'][^\n]*["\']test["\'][^\n]*$',
+            r'(?m)^[^\n]*\bping\b[^\n]*\btest\b[^\n]*$',
+        ):
+            m = re.search(pat, src)
+            if not m:
+                continue
+            line_start = src.rfind("\n", 0, m.start()) + 1
+            end = _stmt_end_index(src, line_start)
+            ind = _line_indent(src[line_start : src.find("\n", line_start)])
+            src = src[:end] + _block(ind, rx_lines) + src[end:]
+            ok_rx = True
+            break
+
+    if not ok_tx:
+        pong = src.find("Pong-Trigger")
+        region_from = pong if pong >= 0 else 0
+        region = src[region_from:]
+        m = re.search(r"(?m)^[^\n]*\.?sendText\s*\(", region)
+        if m:
+            abs_match = region_from + m.start()
+            line_start = src.rfind("\n", 0, abs_match) + 1
+            end = _stmt_end_index(src, line_start)
+            ind = _line_indent(src[line_start : src.find("\n", line_start)])
+            src = src[:end] + _block(ind, tx_lines) + src[end:]
+            ok_tx = True
+
+    return src, ok_rx, ok_tx
 
 
 def patch_bridge(path: Path, mesh_key: str, label: str) -> None:
@@ -116,192 +153,63 @@ def patch_bridge(path: Path, mesh_key: str, label: str) -> None:
         print("skip missing", path)
         return
     src = path.read_text(encoding="utf-8")
-    if MARK_B in src and "mesh_reply_watch.note_rx" in src and "mesh_reply_watch.note_tx" in src:
-        print(label, "schon gepatcht")
+    src = _strip_broken_inserts(src)
+    if (
+        MARK_B in src
+        and f'mesh_reply_watch.note_rx("{mesh_key}")' in src
+        and f'mesh_reply_watch.note_tx("{mesh_key}")' in src
+    ):
+        compile(src, str(path), "exec")
+        path.write_text(src, encoding="utf-8")
+        print(label, "schon gepatcht (bereinigt)")
         return
 
     src = _ensure_import(src, "mesh_reply_watch", MARK_B)
-
-    # RX: after Pong-Trigger log (preferred) or ping/test detect
-    rx_line = (
-        f'        try:\n'
-        f'            mesh_reply_watch.note_rx("{mesh_key}", _from_id(packet) if "_from_id" in dir() else None)  # {MARK_B}\n'
-        f'        except Exception:\n'
-        f'            pass\n'
-    )
-    # simpler single-line insert preferred for bridges
-    rx_simple = (
-        f'        try: mesh_reply_watch.note_rx("{mesh_key}")  # {MARK_B}\n'
-        f'        except Exception: pass\n'
-    )
-    tx_simple = (
-        f'        try: mesh_reply_watch.note_tx("{mesh_key}")  # {MARK_B}\n'
-        f'        except Exception: pass\n'
-    )
-
-    src2, ok_rx = _insert_after_line_containing(
-        src,
-        ['log("Pong-Trigger:"', "log('Pong-Trigger:'", "Pong-Trigger:"],
-        rx_simple,
-        label + " rx",
-    )
+    src, ok_rx, ok_tx = _insert_rx_tx(src, mesh_key, MARK_B)
+    compile(src, str(path), "exec")
+    path.write_text(src, encoding="utf-8")
+    print(f"OK {label} -> {path} rx={ok_rx} tx={ok_tx}")
     if not ok_rx:
-        # resilient: find ping/test branch
-        m = re.search(
-            r"(?m)^(?P<ind>\s*).*(?:text|tl|msg).*(?:\.strip\(\)|\.lower\(\)).*\n"
-            r"(?P=ind).*(?:ping|test).*\n",
-            src2,
-        )
-        if m:
-            # insert after a nearby block — find first 'ping' check line
-            src2, ok_rx = _insert_after_line_containing(
-                src2,
-                ['in ("ping"', "in ('ping'", '== "ping"', "== 'ping'", '== "test"', ".lower() in"],
-                rx_simple,
-                label + " rx-fallback",
-            )
-        if not ok_rx:
-            print(f"WARN {label}: kein Pong-Trigger/ping Anker für note_rx — suche sendText Umgebung")
-
-    src3, ok_tx = _insert_after_line_containing(
-        src2,
-        [
-            "sendText(",
-            ".sendText(",
-            "iface.sendText",
-            "_iface.sendText",
-        ],
-        tx_simple,
-        label + " tx",
-    )
-    # Prefer: insert after the reply send that follows Pong — if multiple sendText, first after Pong-Trigger
-    if ok_tx and "Pong-Trigger" in src3:
-        # Re-do more carefully: find Pong-Trigger, then first sendText after it
-        if src3.count(f'mesh_reply_watch.note_tx("{mesh_key}")') == 0:
-            pass
-        # If note_tx landed before Pong (wrong sendText), relocate
-        pong_i = src3.find("Pong-Trigger")
-        tx_i = src3.find(f'mesh_reply_watch.note_tx("{mesh_key}")')
-        if pong_i >= 0 and 0 <= tx_i < pong_i:
-            # remove misplaced and re-insert after first sendText after pong
-            src3 = src3.replace(tx_simple, "", 1)
-            after = src3[pong_i:]
-            m = re.search(r"(?m)^.*sendText\(.*$", after)
-            if m:
-                abs_line_start = pong_i + m.start()
-                # find end of that line
-                abs_line_end = src3.find("\n", abs_line_start)
-                if abs_line_end < 0:
-                    abs_line_end = len(src3)
-                else:
-                    abs_line_end += 1
-                src3 = src3[:abs_line_end] + tx_simple + src3[abs_line_end:]
-                ok_tx = True
-            else:
-                ok_tx = False
-
-    if not ok_rx:
-        print(f"WARN {label}: note_rx nicht gesetzt — manuell prüfen")
+        print(f"WARN {label}: note_rx fehlt")
     if not ok_tx:
-        # last resort: after Hops von reply string build
-        src3, ok_tx = _insert_after_line_containing(
-            src3,
-            ["Hops ", "· von "],
-            tx_simple,
-            label + " tx-hops",
-        )
-        if not ok_tx:
-            print(f"WARN {label}: note_tx nicht gesetzt — manuell prüfen")
-
-    if MARK_B not in src3:
-        # ensure marker somewhere if imports added
-        src3 = src3.replace(
-            "import mesh_reply_watch",
-            f"import mesh_reply_watch  # {MARK_B}",
-            1,
-        )
-
-    path.write_text(src3, encoding="utf-8")
-    has_rx = "mesh_reply_watch.note_rx" in src3
-    has_tx = "mesh_reply_watch.note_tx" in src3
-    print("OK", label, "->", path, "rx=", has_rx, "tx=", has_tx)
+        print(f"WARN {label}: note_tx fehlt")
 
 
 def patch_ping_reply(path: Path, mesh_key: str) -> None:
     if not path.exists():
-        print("skip missing", path.name)
+        print("skip missing", path)
         return
     src = path.read_text(encoding="utf-8")
-    if MARK_P in src and "mesh_reply_watch.note_rx" in src and "mesh_reply_watch.note_tx" in src:
-        print(path.name, "schon gepatcht")
+    src = _strip_broken_inserts(src)
+    if (
+        MARK_P in src
+        and f'mesh_reply_watch.note_rx("{mesh_key}")' in src
+        and f'mesh_reply_watch.note_tx("{mesh_key}")' in src
+    ):
+        compile(src, str(path), "exec")
+        path.write_text(src, encoding="utf-8")
+        print(path.name, "schon gepatcht (bereinigt)")
         return
 
     src = _ensure_import(src, "mesh_reply_watch", MARK_P)
-
-    rx_simple = (
-        f'        try: mesh_reply_watch.note_rx("{mesh_key}")  # {MARK_P}\n'
-        f'        except Exception: pass\n'
-    )
-    tx_simple = (
-        f'        try: mesh_reply_watch.note_tx("{mesh_key}")  # {MARK_P}\n'
-        f'        except Exception: pass\n'
-    )
-
-    # Typical patterns in reply scripts
-    # Prefer inside ping/test branch (after if … ping)
-    src, ok_rx = _insert_after_line_containing(
-        src,
-        [
-            'in ("ping"',
-            "in ('ping'",
-            '== "ping"',
-            "== 'ping'",
-            '== "test"',
-            "Pong-Trigger",
-            "trigger",
-        ],
-        rx_simple,
-        path.name + " rx",
-    )
+    src, ok_rx, ok_tx = _insert_rx_tx(src, mesh_key, MARK_P)
     if not ok_rx:
-        # insert near onReceive / on_receive handler start after text extract
-        src, ok_rx = _insert_after_line_containing(
-            src,
-            ["def onReceive", "def on_receive", "decoded.get", "get('text'"],
-            rx_simple,
-            path.name + " rx2",
-        )
-
-    src, ok_tx = _insert_after_line_containing(
-        src,
-        ["sendText(", ".sendText(", "send_text("],
-        tx_simple,
-        path.name + " tx",
-    )
-    if not ok_tx:
-        src, ok_tx = _insert_after_line_containing(
-            src,
-            ["Hops ", "· von ", "build_a("],
-            tx_simple,
-            path.name + " tx2",
-        )
-
-    if MARK_P not in src:
-        src = src.replace(
-            "import mesh_reply_watch",
-            f"import mesh_reply_watch  # {MARK_P}",
-            1,
-        )
-
+        m = re.search(r"(?m)^[^\n]*\b(?:ping|test)\b[^\n]*$", src)
+        if m:
+            line_start = src.rfind("\n", 0, m.start()) + 1
+            end = _stmt_end_index(src, line_start)
+            ind = _line_indent(src[line_start : src.find("\n", line_start)])
+            rx_lines = [
+                "try:",
+                f'    mesh_reply_watch.note_rx("{mesh_key}")  # {MARK_P}',
+                "except Exception:",
+                "    pass",
+            ]
+            src = src[:end] + _block(ind, rx_lines) + src[end:]
+            ok_rx = True
+    compile(src, str(path), "exec")
     path.write_text(src, encoding="utf-8")
-    print(
-        "OK",
-        path.name,
-        "rx=",
-        "mesh_reply_watch.note_rx" in src,
-        "tx=",
-        "mesh_reply_watch.note_tx" in src,
-    )
+    print(f"OK {path.name} rx={ok_rx} tx={ok_tx}")
 
 
 def main():
@@ -310,10 +218,10 @@ def main():
     patch_bridge(root / "mesh_bridge_bayern.py", "m2", "mesh2")
     patch_ping_reply(root / "mesh_ping_reply.py", "m1")
     patch_ping_reply(root / "mesh_ping_reply2.py", "m2")
-    # optional bayern alias
     p = root / "mesh_ping_reply_bayern.py"
     if p.exists():
         patch_ping_reply(p, "m2")
+    print("OK patch-mesh-hang-bridges done")
 
 
 if __name__ == "__main__":

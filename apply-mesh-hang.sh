@@ -41,6 +41,17 @@ install -m 0644 /tmp/mesh_reply_watch.py "$DASH_DIR/mesh_reply_watch.py"
 install -m 0644 /tmp/mesh_hang_watchdog.py "$DASH_DIR/mesh_hang_watchdog.py"
 install -m 0755 /tmp/patch-mesh-hang-bridges.py "$DASH_DIR/patch-mesh-hang-bridges.py"
 
+# Falls letzter Apply kaputt ging: neueste bak-meshhang wiederherstellen
+for n in mesh_bridge.py mesh_bridge_bayern.py mesh_ping_reply.py mesh_ping_reply2.py mesh_ping_reply_bayern.py; do
+  latest=$(ls -1t "$DASH_DIR/$n.bak-meshhang-"* 2>/dev/null | head -1 || true)
+  if [ -n "$latest" ]; then
+    if ! python3 -m py_compile "$DASH_DIR/$n" 2>/dev/null; then
+      echo "RESTORE broken $n from $latest"
+      cp -a "$latest" "$DASH_DIR/$n"
+    fi
+  fi
+done
+
 python3 /tmp/patch-mesh-hang-bridges.py "$DASH_DIR"
 
 python3 -m py_compile \
