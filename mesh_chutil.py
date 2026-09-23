@@ -12,6 +12,9 @@ HIST_MAX = 2200  # ~14 Tage à 10 min
 SAMPLE_MIN_GAP = 300  # Sekunden
 THRESH_YELLOW = 25.0
 THRESH_RED = 40.0
+STUCK_MIN_SEC = 1800  # 30 min  # meshHang
+STUCK_MIN_POINTS = 4  # meshHang
+HEARD_STALE_SEC = 1800  # meshHang
 
 
 def now_str():
@@ -230,6 +233,80 @@ def fmt_duration(sec):
     return f"{h // 24} d {h % 24} h"
 
 
+
+def detect_stuck(hist):  # meshHang
+    """Flatline: gleiche ch_util+air_tx über genug Punkte und Dauer."""
+    if not hist or len(hist) < STUCK_MIN_POINTS:
+        return None
+    try:
+        ch0 = round(float(hist[-1].get("ch_util")), 2)
+        tx0 = round(float(hist[-1].get("air_tx") or 0), 3)
+    except Exception:
+        return None
+    start = hist[-1]
+    count = 0
+    for p in reversed(hist):
+        try:
+            ch = round(float(p.get("ch_util")), 2)
+            tx = round(float(p.get("air_tx") or 0), 3)
+        except Exception:
+            break
+        if ch != ch0 or tx != tx0:
+            break
+        start = p
+        count += 1
+    if count < STUCK_MIN_POINTS:
+        return None
+    since_ts = float(start.get("ts") or 0)
+    end_ts = float(hist[-1].get("ts") or time.time())
+    span = max(0, int(end_ts - since_ts))
+    if span < STUCK_MIN_SEC:
+        return None
+    sec = max(0, int(time.time() - since_ts))
+    return {
+        "since_t": start.get("t") or "",
+        "since_ts": since_ts,
+        "sec": sec,
+        "ch_util": ch0,
+        "air_tx": tx0,
+        "points": count,
+    }
+
+
+def tele_health(hist):  # meshHang
+    """Telemetrie-Zustand: ok|stuck|stale|none + Farben für /funk."""
+    stuck = detect_stuck(hist) if hist else None
+    heard_sec = None
+    if hist:
+        try:
+            hs = hist[-1].get("heard_sec")
+            heard_sec = int(hs) if hs is not None else None
+        except Exception:
+            heard_sec = None
+    if stuck:
+        state = "stuck"
+        color = "#eab308"
+        if int(stuck.get("sec") or 0) >= 7200:
+            color = "#ef4444"
+    elif heard_sec is not None and heard_sec > HEARD_STALE_SEC:
+        state = "stale"
+        color = "#eab308"
+    elif hist:
+        state = "ok"
+        color = "#22c55e"
+    else:
+        state = "none"
+        color = "#94a3b8"
+    return {
+        "state": state,
+        "stuck": stuck,
+        "heard_sec": heard_sec,
+        "color": color,
+        "tele_state": state,
+        "tele_color": color,
+    }
+
+
 def hist_payload(path: Path, hours: float = 24):
     hist = load_hist(path)
     now_ts = time.time()
@@ -248,6 +325,16 @@ def hist_payload(path: Path, hours: float = 24):
             f"Kanal über {int(streak['threshold'])} % seit {streak['since_t'] or '?'} "
             f"({fmt_duration(streak['sec'])})"
         )
+    # meshHang: stuck/tele getrennt von Kanal-%-Ampel
+    stuck = detect_stuck(hist)
+    tele = tele_health(hist)
+    stuck_hint = None
+    if stuck:
+        stuck_hint = (
+            f"Telemetrie stuck seit {stuck.get('since_t') or '?'} "
+            f"({fmt_duration(stuck.get('sec'))}, gleicher Kanalwert "
+            f"{stuck.get('ch_util')} % / Air-TX {stuck.get('air_tx')} %)"
+        )
     return {
         "ok": True,
         "at": now_str(),
@@ -264,4 +351,8 @@ def hist_payload(path: Path, hours: float = 24):
         "streak": streak,
         "nodedb": (cur or {}).get("nodedb"),
         "heard_sec": (cur or {}).get("heard_sec"),
+        "stuck": stuck,
+        "stuck_hint": stuck_hint,
+        "tele_state": tele.get("state"),
+        "tele_color": tele.get("color"),
     }

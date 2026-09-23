@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Funk-Seite: Mesh-Status + Kanalauslastung Mesh1/Mesh2. /* chutilFunk */"""
+"""Funk-Seite: Mesh-Status + Kanalauslastung Mesh1/Mesh2. /* chutilFunk */ # meshHangFunk"""
 from flask import render_template_string, jsonify
 from pathlib import Path
 
@@ -7,6 +7,11 @@ try:
     import mesh_chutil
 except Exception:
     mesh_chutil = None
+
+try:
+    import mesh_reply_watch
+except Exception:
+    mesh_reply_watch = None
 
 PAGE = r"""<!DOCTYPE html>
 <html lang="de"><head>
@@ -31,6 +36,7 @@ body{margin:0;font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;
 .hint.red{background:#450a0a;color:#fecaca;border:1px solid #b91c1c}
 .kv{display:grid;grid-template-columns:140px 1fr;gap:4px 10px;margin-top:6px;font-size:0.9rem}
 .kv .k{color:#94a3b8}
+.ampel{font-weight:600}
 </style></head><body>
 <div class="nav">
   <a href="/">Lage</a> <a href="/energie">Energie</a> <a href="/lokale-energie">Lokale Energie</a>
@@ -44,9 +50,13 @@ body{margin:0;font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;
 <div class="title">Mesh-Status</div>
 {% for m in items %}
 <div style="margin:12px 0;padding-bottom:12px;border-bottom:1px solid #334155">
-<div><b>{{ m.name }}</b> · <span style="color:{{ m.color }}">{{ m.label }}</span></div>
+<div><b>{{ m.name }}</b></div>
 <div class="small">{{ m.host }}:4403</div>
 <div class="kv">
+  <div class="k">LAN</div>
+  <div class="ampel" style="color:{{ m.lan_color }}">{{ m.lan_label }}</div>
+  <div class="k">Funk</div>
+  <div class="ampel" style="color:{{ m.funk_color }}">{{ m.funk_label }}</div>
   <div class="k">TCP</div><div><b>{{ "offen" if m.tcp else "zu" }}</b></div>
   <div class="k">Dienst</div>
   <div>{% if m.svc_ok %}aktiv{% elif m.svc_ok is none %}–{% else %}aus{% endif %}</div>
@@ -58,7 +68,12 @@ body{margin:0;font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;
 </div>
 </div>
 {% endfor %}
-<div class="small">Grün = läuft · Gelb = Port offen / Dienst aus · Rot = offline · Node-DB/lastHeard aus Telemetrie</div>
+<div class="small">
+  <b>LAN</b> = Bridge/TCP/systemd (bisherige Ampel) ·
+  <b>Funk</b> = Telemetrie + Ping-Reply ·
+  <b>Stuck</b> = gleicher Telemetriewert zu lange ·
+  <b>Stumm</b> = Ping empfangen, keine Antwort
+</div>
 </div>
 
 <div class="grid">
@@ -73,8 +88,9 @@ body{margin:0;font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;
       <div>Peak 7d <b>{% if c1.peak_7d is not none %}{{ c1.peak_7d }} %{% else %}–{% endif %}</b></div>
     </div>
     {% if c1.hint %}<div class="hint {{ c1.hint_level }}">{{ c1.hint }}</div>{% endif %}
+    {% if c1.stuck_hint %}<div class="hint yellow">{{ c1.stuck_hint }}</div>{% endif %}
     <div class="chart-wrap"><canvas id="ch1"></canvas></div>
-    <div class="small">24h · Telemetrie DeviceMetrics · 5–10 min</div>
+    <div class="small">24h · Telemetrie DeviceMetrics · 5–10 min · Funk {{ c1.tele_state or "–" }}</div>
   </div>
   <div class="card">
     <div class="title">Kanalauslastung · Mesh 2</div>
@@ -87,8 +103,9 @@ body{margin:0;font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;
       <div>Peak 7d <b>{% if c2.peak_7d is not none %}{{ c2.peak_7d }} %{% else %}–{% endif %}</b></div>
     </div>
     {% if c2.hint %}<div class="hint {{ c2.hint_level }}">{{ c2.hint }}</div>{% endif %}
+    {% if c2.stuck_hint %}<div class="hint yellow">{{ c2.stuck_hint }}</div>{% endif %}
     <div class="chart-wrap"><canvas id="ch2"></canvas></div>
-    <div class="small">24h · Telemetrie DeviceMetrics · 5–10 min</div>
+    <div class="small">24h · Telemetrie DeviceMetrics · 5–10 min · Funk {{ c2.tele_state or "–" }}</div>
   </div>
 </div>
 
@@ -135,6 +152,8 @@ def _card(path, hours=24):
         "avg_24h": None, "peak_24h": None, "avg_7d": None, "peak_7d": None,
         "hint": None, "hint_level": "",
         "nodedb": None, "heard_sec": None,
+        "stuck_hint": None, "tele_state": "none", "tele_color": "#94a3b8",
+        "stuck": None,
     }
     if mesh_chutil is None:
         return empty
@@ -160,9 +179,59 @@ def _card(path, hours=24):
             "hint_level": streak.get("level") or "",
             "nodedb": p.get("nodedb") if p.get("nodedb") is not None else cur.get("nodedb"),
             "heard_sec": p.get("heard_sec") if p.get("heard_sec") is not None else cur.get("heard_sec"),
+            "stuck_hint": p.get("stuck_hint"),
+            "stuck": p.get("stuck"),
+            "tele_state": p.get("tele_state") or "none",
+            "tele_color": p.get("tele_color") or "#94a3b8",
         }
     except Exception:
         return empty
+
+
+def _funk_ampel(lan_color, lan_label, card, mesh_key):  # meshHangFunk
+    """Kombiniert Telemetrie + Reply-Watch zu Funk-Status."""
+    # offline if LAN red
+    lan_l = (lan_label or "").lower()
+    if lan_color == "#ef4444" or "offline" in lan_l or lan_l in ("rot", "down", "aus"):
+        return "offline", "#ef4444"
+
+    reply = None
+    if mesh_reply_watch is not None:
+        try:
+            reply = mesh_reply_watch.status(mesh_key, stale_sec=3600)
+        except Exception:
+            reply = None
+
+    tele_state = (card or {}).get("tele_state") or "none"
+    stuck = (card or {}).get("stuck")
+    stuck_sec = int((stuck or {}).get("sec") or 0) if stuck else 0
+
+    # stumm if reply silent
+    if reply and (reply.get("silent") or reply.get("state") == "stumm"):
+        # yellow normally, red if also stuck long
+        if stuck_sec >= 7200:
+            return "stumm", "#ef4444"
+        return "stumm", "#eab308"
+
+    # stuck if tele stuck
+    if tele_state == "stuck" or stuck:
+        if stuck_sec >= 7200:
+            return "stuck", "#ef4444"
+        return "stuck", "#eab308"
+
+    if tele_state == "stale":
+        return "stuck", "#eab308"  # stale heard → gelb, Label bleibt aussagekräftig via tele
+
+    if tele_state == "ok":
+        return "ok", "#22c55e"
+
+    if reply and reply.get("state") == "ok":
+        return "ok", "#22c55e"
+
+    if tele_state == "none" and (not reply or reply.get("state") == "unbekannt"):
+        return "–", "#94a3b8"
+
+    return "–", "#94a3b8"
 
 
 def register_funk(app):
@@ -181,9 +250,16 @@ def register_funk(app):
             m = dict(m)
             if m.get("nodedb") is None:
                 m["nodedb"] = card.get("nodedb")
-            # Prefer live telemetry heard_sec from sample; keep status heard_sec if set
             if m.get("heard_sec") is None:
                 m["heard_sec"] = card.get("heard_sec")
+            # LAN = bisherige Ampel
+            m["lan_color"] = m.get("color") or "#94a3b8"
+            m["lan_label"] = m.get("label") or "–"
+            funk_label, funk_color = _funk_ampel(
+                m["lan_color"], m["lan_label"], card, key
+            )
+            m["funk_label"] = funk_label
+            m["funk_color"] = funk_color
             items.append(m)
         return render_template_string(PAGE, items=items, c1=c1, c2=c2)
 
