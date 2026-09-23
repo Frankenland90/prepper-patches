@@ -12,7 +12,7 @@ UNK_SNR = -128
 HIST_HOURS = 48
 HIST_MAX = 80  # ~48h @ 1/h + Puffer
 DEFAULT_FILE = Path("/home/fmg/prepper-dashboard/mesh1_traceroute.json")
-TRACE_DEST_DEFAULT = "!4191a2ef"
+TRACE_DEST_DEFAULT = "!fbc48dcb"
 
 
 def now_str() -> str:
