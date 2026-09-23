@@ -1,0 +1,16 @@
+[Unit]
+Description=Prepper Mesh Hang Watchdog (stuck Telemetrie / Reply)
+After=network.target
+
+[Service]
+Type=oneshot
+User=fmg
+WorkingDirectory=/home/fmg/prepper-dashboard
+Environment=PYTHONPATH=/home/fmg/prepper-dashboard
+# Detect-only by default. Autorestart only if secrets/mesh_hang_autorestart exists.
+# Optional: Environment=MESH_HANG_WATCHDOG=1
+ExecStart=/usr/bin/python3 /home/fmg/prepper-dashboard/mesh_hang_watchdog.py
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
