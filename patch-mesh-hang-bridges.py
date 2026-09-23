@@ -114,6 +114,10 @@ def _insert_after_substring_line(
     lines = src.splitlines(keepends=True)
     for i, line in enumerate(lines):
         if substr in line and "mesh_reply_watch" not in line:
+            # Skip mid-list / trailing-comma lines (reply2 Hops row)
+            stripped = line.rstrip("\n").rstrip()
+            if stripped.endswith(",") or stripped.endswith("(") or stripped.endswith("\\"):
+                continue
             ind = _line_indent(line)
             block = "".join(ind + ln + "\n" for ln in block_lines)
             lines.insert(i + 1, block)
@@ -135,7 +139,6 @@ def _find_send_matches(region: str) -> list[re.Match[str]]:
     for pat in _SEND_PATS:
         found.extend(re.finditer(pat, region))
     found.sort(key=lambda m: m.start())
-    # de-dupe overlapping same start
     out: list[re.Match[str]] = []
     seen: set[int] = set()
     for m in found:
@@ -160,12 +163,10 @@ def _insert_note_tx_after_send(
     matches = _find_send_matches(region)
     if not matches:
         return src, False
-    # last send in window (bridges: sendText sits before Pong-Trigger log)
     m = matches[-1]
     abs_match = after_pos + m.start()
     line_start = src.rfind("\n", 0, abs_match) + 1
     stmt_end = _stmt_end_index(src, line_start)
-    # don't insert past before_pos
     if before_pos is not None and stmt_end > before_pos:
         stmt_end = before_pos
     nl = src.find("\n", line_start)
@@ -178,6 +179,27 @@ def _insert_note_tx_after_send(
     ]
     block = "".join(ind + ln + "\n" for ln in block_lines)
     return src[:stmt_end] + block + src[stmt_end:], True
+
+
+def _insert_note_rx_before_send(src: str, mesh_key: str, mark: str) -> tuple[str, bool]:
+    key = f'mesh_reply_watch.note_rx("{mesh_key}")'
+    if key in src:
+        return src, True
+    matches = _find_send_matches(src)
+    if not matches:
+        return src, False
+    m = matches[0]
+    line_start = src.rfind("\n", 0, m.start()) + 1
+    nl = src.find("\n", line_start)
+    ind = _line_indent(src[line_start : nl if nl >= 0 else len(src)])
+    block_lines = [
+        "try:",
+        f'    mesh_reply_watch.note_rx("{mesh_key}")  # {mark}',
+        "except Exception:",
+        "    pass",
+    ]
+    block = "".join(ind + ln + "\n" for ln in block_lines)
+    return src[:line_start] + block + src[line_start:], True
 
 
 def patch_bridge(path: Path, mesh_key: str, label: str) -> None:
@@ -217,13 +239,11 @@ def patch_bridge(path: Path, mesh_key: str, label: str) -> None:
     pong = src.find("Pong-Trigger")
     if pong < 0:
         pong = len(src)
-    # search window: up to ~80 lines before Pong (handler body)
     window_start = max(0, pong - 4000)
     src, ok_tx = _insert_note_tx_after_send(
         src, mesh_key, MARK_B, after_pos=window_start, before_pos=pong
     )
     if not ok_tx:
-        # fallback: any sendText in file
         src, ok_tx = _insert_note_tx_after_send(src, mesh_key, MARK_B, after_pos=0)
 
     compile(src, str(path), "exec")
@@ -250,46 +270,30 @@ def patch_ping_reply(path: Path, mesh_key: str) -> None:
     ]
 
     ok_rx = False
-    for exact in (
-        "        msg = build_a(packet, from_id, rx, now_hms(), _from_label(interface, from_id))  # /* pingName */",
-        "        msg = build_a(packet, from_id, rx, now_hms())",
-    ):
-        src, ok = _insert_after_exact_line(
-            src, exact, rx_lines, f'mesh_reply_watch.note_rx("{mesh_key}")'
-        )
-        if ok and f'mesh_reply_watch.note_rx("{mesh_key}")' in src:
-            ok_rx = True
-            break
-    if not ok_rx:
-        src, ok_rx = _insert_after_substring_line(
-            src,
-            "msg = build_a(",
-            rx_lines,
-            f'mesh_reply_watch.note_rx("{mesh_key}")',
-        )
+    # reply2 Hops-row is a mid-list string — never insert after it
+    is_reply2 = path.name.startswith("mesh_ping_reply2") or "bayern" in path.name
 
-    # reply2 / bayern: no build_a — hook near hops/von or before sendText
-    if f'mesh_reply_watch.note_rx("{mesh_key}")' not in src:
-        for needle in (
-            "Hops %s · von %s",
-            "Hops %s",
-            "von %s",
-            "channelIndex",
+    if not is_reply2:
+        for exact in (
+            "        msg = build_a(packet, from_id, rx, now_hms(), _from_label(interface, from_id))  # /* pingName */",
+            "        msg = build_a(packet, from_id, rx, now_hms())",
         ):
-            src, ok_rx = _insert_after_substring_line(
-                src, needle, rx_lines, f'mesh_reply_watch.note_rx("{mesh_key}")'
+            src, ok = _insert_after_exact_line(
+                src, exact, rx_lines, f'mesh_reply_watch.note_rx("{mesh_key}")'
             )
-            if ok_rx and f'mesh_reply_watch.note_rx("{mesh_key}")' in src:
+            if ok and f'mesh_reply_watch.note_rx("{mesh_key}")' in src:
+                ok_rx = True
                 break
+        if not ok_rx:
+            src, ok_rx = _insert_after_substring_line(
+                src,
+                "msg = build_a(",
+                rx_lines,
+                f'mesh_reply_watch.note_rx("{mesh_key}")',
+            )
+
     if f'mesh_reply_watch.note_rx("{mesh_key}")' not in src:
-        # last resort: insert immediately before first sendText
-        m = re.search(r"(?m)^[^\n]*\.sendText\s*\(", src)
-        if m:
-            line_start = src.rfind("\n", 0, m.start()) + 1
-            ind = _line_indent(src[line_start : src.find("\n", line_start)])
-            block = "".join(ind + ln + "\n" for ln in rx_lines)
-            src = src[:line_start] + block + src[line_start:]
-            ok_rx = True
+        src, ok_rx = _insert_note_rx_before_send(src, mesh_key, MARK_P)
 
     src, ok_tx = _insert_note_tx_after_send(src, mesh_key, MARK_P, after_pos=0)
 
