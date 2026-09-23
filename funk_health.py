@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Funk-Seite: Mesh-Status + Kanalauslastung Mesh1/Mesh2. /* chutilFunk */ # meshHangFunk"""
+import json
 from flask import render_template_string, jsonify
 from pathlib import Path
 
@@ -65,6 +66,11 @@ body{margin:0;font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;
   <div class="k">Node-DB</div><div>{% if m.nodedb is not none %}{{ m.nodedb }}{% else %}–{% endif %}</div>
   <div class="k">lastHeard</div>
   <div>{% if m.heard_sec is not none %}{{ m.heard_sec }} s{% else %}–{% endif %}</div>
+  <div class="k">Ping RX</div><div>{{ m.ping_rx or "–" }}</div>
+  <div class="k">Ping TX</div><div>{{ m.ping_tx or "–" }}</div>
+  {% if m.watch_hint %}
+  <div class="k">Watchdog</div><div style="color:{{ m.watch_color or '#eab308' }}">{{ m.watch_hint }}</div>
+  {% endif %}
 </div>
 </div>
 {% endfor %}
@@ -90,7 +96,7 @@ body{margin:0;font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;
     {% if c1.hint %}<div class="hint {{ c1.hint_level }}">{{ c1.hint }}</div>{% endif %}
     {% if c1.stuck_hint %}<div class="hint yellow">{{ c1.stuck_hint }}</div>{% endif %}
     <div class="chart-wrap"><canvas id="ch1"></canvas></div>
-    <div class="small">24h · Telemetrie DeviceMetrics · 5–10 min · Funk {{ c1.tele_state or "–" }}</div>
+    <div class="small">24h · Telemetrie · Funk {{ c1.tele_state or "–" }}{% if c1.reply_state %} · Reply {{ c1.reply_state }}{% endif %}</div>
   </div>
   <div class="card">
     <div class="title">Kanalauslastung · Mesh 2</div>
@@ -105,7 +111,7 @@ body{margin:0;font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;
     {% if c2.hint %}<div class="hint {{ c2.hint_level }}">{{ c2.hint }}</div>{% endif %}
     {% if c2.stuck_hint %}<div class="hint yellow">{{ c2.stuck_hint }}</div>{% endif %}
     <div class="chart-wrap"><canvas id="ch2"></canvas></div>
-    <div class="small">24h · Telemetrie DeviceMetrics · 5–10 min · Funk {{ c2.tele_state or "–" }}</div>
+    <div class="small">24h · Telemetrie · Funk {{ c2.tele_state or "–" }}{% if c2.reply_state %} · Reply {{ c2.reply_state }}{% endif %}</div>
   </div>
 </div>
 
@@ -152,7 +158,7 @@ def _card(path, hours=24):
         "avg_24h": None, "peak_24h": None, "avg_7d": None, "peak_7d": None,
         "hint": None, "hint_level": "",
         "nodedb": None, "heard_sec": None,
-        "stuck_hint": None, "tele_state": "none", "tele_color": "#94a3b8",
+        "stuck_hint": None, "tele_state": "none", "tele_color": "#94a3b8", "reply_state": None,
         "stuck": None,
     }
     if mesh_chutil is None:
@@ -220,7 +226,7 @@ def _funk_ampel(lan_color, lan_label, card, mesh_key):  # meshHangFunk
         return "stuck", "#eab308"
 
     if tele_state == "stale":
-        return "stuck", "#eab308"  # stale heard → gelb, Label bleibt aussagekräftig via tele
+        return "alt", "#eab308"
 
     if tele_state == "ok":
         return "ok", "#22c55e"
@@ -260,7 +266,50 @@ def register_funk(app):
             )
             m["funk_label"] = funk_label
             m["funk_color"] = funk_color
+            # Ping RX/TX ages + watchdog hint (meshHangFunk)
+            m["ping_rx"] = "–"
+            m["ping_tx"] = "–"
+            if mesh_reply_watch is not None:
+                try:
+                    rs = mesh_reply_watch.status(key, stale_sec=3600) or {}
+                    card["reply_state"] = rs.get("state") or "unbekannt"
+                    def _age(sec):
+                        if sec is None:
+                            return "–"
+                        sec = int(sec)
+                        if sec < 60:
+                            return f"{sec} s"
+                        if sec < 3600:
+                            return f"{sec // 60} min"
+                        return f"{sec // 3600} h"
+                    m["ping_rx"] = _age(rs.get("last_rx_age"))
+                    m["ping_tx"] = _age(rs.get("last_tx_age"))
+                except Exception:
+                    pass
+            m["watch_hint"] = None
+            m["watch_color"] = "#eab308"
+            try:
+                wst = json.loads((base / "mesh_hang_status.json").read_text() or "{}")
+                mesh_st = (wst.get("meshes") or {}).get(key) or {}
+                act = mesh_st.get("action")
+                if mesh_st.get("recommend_restart"):
+                    m["watch_hint"] = "Restart empfohlen" + (f" ({act})" if act else "")
+                    m["watch_color"] = "#ef4444"
+                elif act and act not in ("ok", None, ""):
+                    m["watch_hint"] = str(act)
+                    m["watch_color"] = "#eab308"
+                elif mesh_st.get("stuck"):
+                    m["watch_hint"] = "Telemetrie stuck"
+            except Exception:
+                pass
             items.append(m)
+        # reply_state on channel cards
+        for card, key in ((c1, "m1"), (c2, "m2")):
+            if mesh_reply_watch is not None and not card.get("reply_state"):
+                try:
+                    card["reply_state"] = (mesh_reply_watch.status(key) or {}).get("state")
+                except Exception:
+                    card["reply_state"] = None
         return render_template_string(PAGE, items=items, c1=c1, c2=c2)
 
     @app.route("/api/funk/chutil")
@@ -270,3 +319,5 @@ def register_funk(app):
             "m1": _card(base / "mesh1_chutil.json"),
             "m2": _card(base / "mesh2_chutil.json"),
         })
+
+
