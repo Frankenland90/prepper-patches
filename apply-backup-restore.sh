@@ -14,7 +14,45 @@ echo "=== bakRestore apply COMMIT=$COMMIT ==="
 
 die() { echo "ERR: $*" >&2; exit 1; }
 
-curl -fsSL "$BASE/patch-backup-restore.py" -o "$TMP/patch-backup-restore.py"
+# Prefer single file; fall back to part0..partN assembly
+: > "$TMP/patch-backup-restore.py"
+if curl -fsSL "$BASE/patch-backup-restore.py" -o "$TMP/patch-single.py" 2>/dev/null; then
+  BYTES=$(wc -c < "$TMP/patch-single.py")
+  if [[ "$BYTES" -ge 5000 ]] && ! grep -q '^PLACEHOLDER$' "$TMP/patch-single.py"; then
+    cp "$TMP/patch-single.py" "$TMP/patch-backup-restore.py"
+    echo "OK single patcher $BYTES bytes"
+  fi
+fi
+if [[ ! -s "$TMP/patch-backup-restore.py" ]] || [[ $(wc -c < "$TMP/patch-backup-restore.py") -lt 5000 ]]; then
+  if curl -fsSL "$BASE/patch-backup-restore.zb64" -o "$TMP/patch.zb64" 2>/dev/null; then
+    echo "INFO: decoding patch-backup-restore.zb64…"
+    python3 - "$TMP/patch.zb64" "$TMP/patch-backup-restore.py" <<'PYDEC'
+import sys, base64, zlib
+src, dst = sys.argv[1], sys.argv[2]
+data = open(src, "r", encoding="ascii").read().strip()
+open(dst, "wb").write(zlib.decompress(base64.b64decode(data)))
+PYDEC
+  fi
+fi
+if [[ ! -s "$TMP/patch-backup-restore.py" ]] || [[ $(wc -c < "$TMP/patch-backup-restore.py") -lt 5000 ]]; then
+  echo "INFO: assembling patcher from parts…"
+  : > "$TMP/patch-backup-restore.py"
+  if curl -fsSL "$BASE/patch-backup-restore.parts" -o "$TMP/parts" 2>/dev/null; then
+    while IFS= read -r part; do
+      [[ -z "$part" ]] && continue
+      curl -fsSL "$BASE/$part" >> "$TMP/patch-backup-restore.py" || die "curl $part failed"
+    done < "$TMP/parts"
+  else
+    for i in 0 1 2 3 4 5 6 7 8 9; do
+      if curl -fsSL "$BASE/patch-backup-restore.part$i" >> "$TMP/patch-backup-restore.py" 2>/dev/null; then
+        :
+      else
+        break
+      fi
+    done
+  fi
+fi
+
 BYTES=$(wc -c < "$TMP/patch-backup-restore.py")
 if [[ "$BYTES" -lt 5000 ]]; then
   die "patch-backup-restore.py too small ($BYTES bytes) — PLACEHOLDER or bad COMMIT?"
@@ -68,7 +106,6 @@ verify_dash() {
   return $((1 - ok))
 }
 
-# If marker present but verification already fails → try restore from bak with OLD anchors, then patch
 needs_force=0
 if grep -qF "/* bakRestore */" "$DASH" 2>/dev/null; then
   if ! verify_dash "$DASH" >/tmp/bakrestore-preverify-$$.txt 2>&1; then
@@ -83,7 +120,6 @@ rm -f /tmp/bakrestore-preverify-$$.txt
 
 if [[ "$needs_force" -eq 1 ]]; then
   restored=""
-  # Newest bak that still has OLD anchors (unpatched or pre-bakrestore)
   shopt -s nullglob
   for bak in $(ls -1t "$APP"/dashboard.py.bak-pre-bakrestore-* 2>/dev/null); do
     if grep -qF 'def api_backup_run():' "$bak" \
