@@ -2,6 +2,7 @@
 """Mesh1 only: traceroute_worker + manual /traceroute/run via existing _iface.
 /* meshTraceBridge */ /* meshTraceManual */
 Idempotent: upgrades ALREADY-patched bridges (adds run_once + do_POST).
+sendData under _lock (proven 071f133); manual probes tagged manual=True.
 """
 from __future__ import annotations
 
@@ -16,20 +17,21 @@ RUN_ONCE = '''
 _trace_busy = False  # /* meshTraceManual */
 
 
-def traceroute_run_once():  # /* meshTraceManual */
-    """Ein Trace über bestehende _iface-Session (kein 2. TCP)."""
+def traceroute_run_once(manual=False):  # /* meshTraceManual */
+    """Ein Trace über bestehende _iface-Session (kein 2. TCP).
+    sendData unter _lock; wait außerhalb (wie 071f133)."""
     global _trace_busy
     try:
-        with _lock:
-            iface = _iface
         mesh_traceroute.execute_probe(
-            iface,
+            lambda: _iface,
+            lock=_lock,
             dest=TRACE_DEST,
             path=TRACE_FILE,
             timeout=TRACE_TIMEOUT,
             hop_limit=TRACE_HOP,
             channel_index=TRACE_CH,
             log_fn=log,
+            manual=manual,
         )
     except Exception as e:
         try:
@@ -53,7 +55,7 @@ def traceroute_worker():  # /* meshTraceBridge */
                 time.sleep(TRACE_INTERVAL)
                 continue
             _trace_busy = True
-            traceroute_run_once()
+            traceroute_run_once(manual=False)
         except Exception as e:
             _trace_busy = False
             log("traceroute_worker:", e)
@@ -71,12 +73,22 @@ DO_POST = '''
                 self._json(409, {"ok": False, "started": False, "dest": TRACE_DEST})
                 return
             _trace_busy = True
-            threading.Thread(target=traceroute_run_once, daemon=True).start()
+            threading.Thread(
+                target=traceroute_run_once, kwargs={"manual": True}, daemon=True
+            ).start()
             self._json(202, {"ok": True, "started": True, "dest": TRACE_DEST})
             return
         self._json(404, {"error": "not found"})
 
 '''
+
+
+def _run_once_is_fixed(body: str) -> bool:
+    return (
+        "lock=_lock" in body
+        and "manual" in body
+        and ("lambda: _iface" in body or "get_iface" in body)
+    )
 
 
 def _ensure_import(src: str) -> str:
@@ -130,8 +142,38 @@ def _ensure_constants(src: str) -> str:
 
 
 def _ensure_run_once(src: str) -> str:
-    if "def traceroute_run_once():" in src and "_trace_busy" in src:
+    """Insert or upgrade traceroute_run_once to lock-around-send + manual kwarg."""
+    m = re.search(
+        r"(?ms)^def traceroute_run_once\([^)]*\):.*?^(?=def |\Z)",
+        src,
+    )
+    if m:
+        body = m.group(0)
+        if _run_once_is_fixed(body):
+            if not re.search(r"(?m)^_trace_busy\s*=", src):
+                src = (
+                    src[: m.start()]
+                    + "_trace_busy = False  # /* meshTraceManual */\n\n"
+                    + src[m.start() :]
+                )
+            return src
+        # Drop module-level _trace_busy immediately before the function, then
+        # insert full RUN_ONCE (which declares it once).
+        pre = src[: m.start()]
+        pre = re.sub(
+            r"(?ms)(?:^|\n)_trace_busy = False[^\n]*\n\s*\Z",
+            "\n",
+            pre,
+        )
+        src = pre + RUN_ONCE + src[m.end() :]
+        # Collapse accidental duplicate declarations
+        src = re.sub(
+            r"(?m)^(_trace_busy = False[^\n]*\n)(?:\s*_trace_busy = False[^\n]*\n)+",
+            r"\1",
+            src,
+        )
         return src
+
     # Prefer insert just before traceroute_worker or main
     if "def traceroute_worker():" in src:
         src = src.replace(
@@ -157,11 +199,19 @@ def _replace_or_insert_worker(src: str) -> str:
         if m:
             body = m.group(0)
             if (
-                "traceroute_run_once()" in body
-                and "execute_probe" not in body.replace("traceroute_run_once", "")
+                "traceroute_run_once" in body
+                and "execute_probe" not in body
                 and "sendData" not in body
             ):
-                return src  # already upgraded
+                # Ensure worker passes manual=False (or relies on default)
+                if "manual=False" not in body and "traceroute_run_once()" in body:
+                    body2 = body.replace(
+                        "traceroute_run_once()",
+                        "traceroute_run_once(manual=False)",
+                        1,
+                    )
+                    src = src[: m.start()] + body2 + src[m.end() :]
+                return src
             src = src[: m.start()] + WORKER + src[m.end() :]
             return src
     if "\ndef main():\n" not in src:
@@ -234,13 +284,35 @@ def _ensure_get(src: str) -> str:
     return src
 
 
+def _upgrade_do_post_manual(body: str) -> str:
+    """Ensure Thread start passes manual=True."""
+    if 'kwargs={"manual": True}' in body or "kwargs={'manual': True}" in body:
+        return body
+    body = body.replace(
+        "threading.Thread(target=traceroute_run_once, daemon=True).start()",
+        'threading.Thread(target=traceroute_run_once, kwargs={"manual": True}, daemon=True).start()',
+    )
+    # lambda forms
+    body = re.sub(
+        r"threading\.Thread\(\s*target\s*=\s*lambda\s*:\s*traceroute_run_once\(\s*\)\s*,\s*daemon\s*=\s*True\s*\)\.start\(\)",
+        'threading.Thread(target=traceroute_run_once, kwargs={"manual": True}, daemon=True).start()',
+        body,
+    )
+    return body
+
+
 def _ensure_do_post(src: str) -> str:
     if "def do_POST(self):" in src and "traceroute_run_once" in src:
         # Already has traceroute POST handling?
         if "/traceroute/run" in src or 'startswith("/traceroute")' in src:
-            # Check do_POST body mentions traceroute
-            m = re.search(r"(?ms)^[ \t]*def do_POST\(self\):.*?(?=^[ \t]*def |\Z)", src)
+            m = re.search(
+                r"(?ms)^[ \t]*def do_POST\(self\):.*?(?=^[ \t]*def |\Z)", src
+            )
             if m and "traceroute" in m.group(0):
+                body = m.group(0)
+                body2 = _upgrade_do_post_manual(body)
+                if body2 != body:
+                    src = src[: m.start()] + body2 + src[m.end() :]
                 return src
     if "def do_POST(self):" in src:
         # Existing do_POST without traceroute — inject at start of method
@@ -265,7 +337,7 @@ def _ensure_do_post(src: str) -> str:
             + ind
             + "        _trace_busy = True\n"
             + ind
-            + "        threading.Thread(target=traceroute_run_once, daemon=True).start()\n"
+            + '        threading.Thread(target=traceroute_run_once, kwargs={"manual": True}, daemon=True).start()\n'
             + ind
             + '        self._json(202, {"ok": True, "started": True, "dest": TRACE_DEST})\n'
             + ind
@@ -295,14 +367,14 @@ def patch_mesh1(path: Path):
     already_full = (
         MARK in src
         and MARK_M in src
-        and "def traceroute_run_once():" in src
+        and "def traceroute_run_once" in src
         and "def do_POST(self):" in src
-        and "traceroute_run_once()" in src
+        and "traceroute_run_once" in src
         and "!fbc48dcb" in src
     )
     if already_full:
-        # Still re-run ensure steps for safety (idempotent)
-        print("mesh1 schon vollständig (meshTraceBridge+Manual) — prüfe Idempotenz")
+        # Still re-run ensure steps for safety (idempotent upgrade)
+        print("mesh1 schon vollständig (meshTraceBridge+Manual) — prüfe Idempotenz/Upgrade")
 
     src = _ensure_import(src)
     src = _ensure_constants(src)
@@ -322,9 +394,16 @@ def patch_mesh1(path: Path):
         )
     if MARK_M not in src:
         src = src.replace(
-            "def traceroute_run_once():",
-            "def traceroute_run_once():  # %s" % MARK_M,
+            "def traceroute_run_once(",
+            "def traceroute_run_once(",  # marker on next line if needed
             1,
+        )
+        # Prefer tagging the function definition comment
+        src = re.sub(
+            r"(?m)^(def traceroute_run_once\([^)]*\):)",
+            r"\1  # %s" % MARK_M,
+            src,
+            count=1,
         )
 
     path.write_text(src, encoding="utf-8")
