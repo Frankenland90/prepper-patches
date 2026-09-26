@@ -217,15 +217,15 @@ def patch_mesh1(path: Path):
         insert = (
             '                self._json(500, {"ok": False, "error": str(e)})\n'
             "            return\n"
-            '            if self.path.startswith("/traceroute"):  # %s\n' % MARK
+            '        if self.path.startswith("/traceroute"):  # %s\n' % MARK
             + "            try:\n"
-            + "                last = mesh_traceroute.last_sample(TRACE_FILE)\n"
-            + "                hist = mesh_traceroute.hist_payload(TRACE_FILE, hours=48)\n"
-            + '                self._json(200, {"ok": True, "last": last, "hist": hist})\n'
-            + "            except Exception as e:\n"
-            + '                self._json(500, {"ok": False, "error": str(e)})\n'
-            + "            return\n"
-            + '        self._json(404, {"error": "not found"})\n'
+            "                last = mesh_traceroute.last_sample(TRACE_FILE)\n"
+            "                hist = mesh_traceroute.hist_payload(TRACE_FILE, hours=48)\n"
+            '                self._json(200, {"ok": True, "last": last, "hist": hist})\n'
+            "            except Exception as e:\n"
+            '                self._json(500, {"ok": False, "error": str(e)})\n'
+            "            return\n"
+            '        self._json(404, {"error": "not found"})\n'
         )
         if chutil_end in src:
             src = src.replace(chutil_end, insert, 1)
@@ -234,12 +234,12 @@ def patch_mesh1(path: Path):
                 old_get_end,
                 '        if self.path.startswith("/traceroute"):  # %s\n' % MARK
                 + "            try:\n"
-                + "                last = mesh_traceroute.last_sample(TRACE_FILE)\n"
-                + "                hist = mesh_traceroute.hist_payload(TRACE_FILE, hours=48)\n"
-                + '                self._json(200, {"ok": True, "last": last, "hist": hist})\n'
-                + "            except Exception as e:\n"
-                + '                self._json(500, {"ok": False, "error": str(e)})\n'
-                + "            return\n"
+                "                last = mesh_traceroute.last_sample(TRACE_FILE)\n"
+                "                hist = mesh_traceroute.hist_payload(TRACE_FILE, hours=48)\n"
+                '                self._json(200, {"ok": True, "last": last, "hist": hist})\n'
+                "            except Exception as e:\n"
+                '                self._json(500, {"ok": False, "error": str(e)})\n'
+                "            return\n"
                 + old_get_end,
                 1,
             )
