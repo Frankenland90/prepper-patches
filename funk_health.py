@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Funk-Seite: Mesh-Status + Kanalauslastung Mesh1/Mesh2 + Trace Mesh1. /* chutilFunk */ # meshHangFunk # meshTraceFunk"""
+"""Funk-Seite: Mesh-Status + Kanalauslastung Mesh1/Mesh2. /* chutilFunk */ # meshHangFunk"""
 import json
 from flask import render_template_string, jsonify
 from pathlib import Path
@@ -13,11 +13,6 @@ try:
     import mesh_reply_watch
 except Exception:
     mesh_reply_watch = None
-
-try:
-    import mesh_traceroute  # meshTraceFunk
-except Exception:
-    mesh_traceroute = None
 
 PAGE = r"""<!DOCTYPE html>
 <html lang="de"><head>
@@ -120,27 +115,6 @@ body{margin:0;font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;
   </div>
 </div>
 
-<div class="card">
-  <div class="title">Trace · MMSC-RTB · Mesh 1</div>
-  <div class="big" style="color:{{ tr.color }}">{% if tr.last_ok is none %}–{% elif tr.last_ok %}ok{% else %}fail{% endif %}</div>
-  <div class="small">
-    Ziel {{ tr.dest or "!fbc48dcb" }} ·
-    {% if tr.last_ok %}OK{% elif tr.last_ok is none %}noch kein Probe{% else %}Fail{% endif %}
-    {% if tr.at %} · {{ tr.at }}{% endif %}
-    {% if tr.age %} · vor {{ tr.age }}{% endif %}
-    · Fails in Folge: {{ tr.fails }}
-  </div>
-  <div class="stats">
-    <div>SNR hin <b>{% if tr.snr_t is not none %}{{ tr.snr_t }} dB{% else %}–{% endif %}</b></div>
-    <div>SNR zurück <b>{% if tr.snr_b is not none %}{{ tr.snr_b }} dB{% else %}–{% endif %}</b></div>
-    <div>Hops hin <b>{% if tr.hops_t is not none %}{{ tr.hops_t }}{% else %}–{% endif %}</b></div>
-    <div>Hops zurück <b>{% if tr.hops_b is not none %}{{ tr.hops_b }}{% else %}–{% endif %}</b></div>
-  </div>
-  {% if tr.error %}<div class="hint red">{{ tr.error }}</div>{% endif %}
-  <div class="chart-wrap"><canvas id="tr1"></canvas></div>
-  <div class="small">48h · SNR hin / SNR zurück (dB) · stündlich · LongFast</div>
-</div>
-
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
 function mk(id, labels, ch, tx, color){
@@ -162,24 +136,6 @@ function mk(id, labels, ch, tx, color){
 }
 mk('ch1', {{ c1.hist_t|tojson }}, {{ c1.hist_ch|tojson }}, {{ c1.hist_tx|tojson }}, '#3b82f6');
 mk('ch2', {{ c2.hist_t|tojson }}, {{ c2.hist_ch|tojson }}, {{ c2.hist_tx|tojson }}, '#a78bfa');
-(function(){
-  const el=document.getElementById('tr1');
-  const labels={{ tr.hist_t|tojson }};
-  if(!el || !labels || !labels.length) return;
-  new Chart(el.getContext('2d'),{
-    type:'line',
-    data:{labels:labels,datasets:[
-      {label:'SNR hin',data:{{ tr.hist_snr_t|tojson }},borderColor:'#22c55e',backgroundColor:'#22c55e22',borderWidth:2,pointRadius:2,spanGaps:false,fill:false,tension:0.2},
-      {label:'SNR zurück',data:{{ tr.hist_snr_b|tojson }},borderColor:'#38bdf8',backgroundColor:'#38bdf822',borderWidth:2,pointRadius:2,spanGaps:false,fill:false,tension:0.2}
-    ]},
-    options:{responsive:true,maintainAspectRatio:false,animation:false,
-      plugins:{legend:{labels:{color:'#94a3b8',boxWidth:10}}},
-      scales:{
-        x:{ticks:{color:'#64748b',maxTicksLimit:8},grid:{color:'#1e293b'}},
-        y:{ticks:{color:'#64748b',callback:v=>v+' dB'},grid:{color:'#334155'}}
-      }}
-  });
-})();
 </script>
 </body></html>
 """
@@ -245,16 +201,6 @@ def _funk_ampel(lan_color, lan_label, card, mesh_key):  # meshHangFunk
     if lan_color == "#ef4444" or "offline" in lan_l or lan_l in ("rot", "down", "aus"):
         return "offline", "#ef4444"
 
-    # Mesh1: 2 aufeinanderfolgende Trace-Fails → Funk rot  # meshTraceFunk
-    if mesh_key == "m1" and mesh_traceroute is not None:
-        try:
-            base = Path("/home/fmg/prepper-dashboard")
-            fails = mesh_traceroute.consecutive_fails(base / "mesh1_traceroute.json")
-            if fails >= 2:
-                return "trace-fail", "#ef4444"
-        except Exception:
-            pass
-
     reply = None
     if mesh_reply_watch is not None:
         try:
@@ -294,57 +240,6 @@ def _funk_ampel(lan_color, lan_label, card, mesh_key):  # meshHangFunk
     return "–", "#94a3b8"
 
 
-
-def _trace_card(path):  # meshTraceFunk
-    empty = {
-        "dest": "!fbc48dcb", "last_ok": None, "at": "", "age": "", "fails": 0,
-        "snr_t": None, "snr_b": None, "hops_t": None, "hops_b": None,
-        "error": None, "color": "#94a3b8",
-        "hist_t": [], "hist_snr_t": [], "hist_snr_b": [],
-    }
-    if mesh_traceroute is None:
-        return empty
-    try:
-        p = mesh_traceroute.hist_payload(Path(path), hours=48)
-        cur = p.get("current") or {}
-        fails = int(p.get("consecutive_fails") or 0)
-        last_ok = cur.get("ok") if cur else None
-        if last_ok is True:
-            color = "#22c55e"
-        elif last_ok is False:
-            color = "#ef4444" if fails >= 2 else "#eab308"
-        else:
-            color = "#94a3b8"
-        age_s = p.get("age_sec")
-        age = ""
-        if age_s is not None:
-            age_s = int(age_s)
-            if age_s < 60:
-                age = f"{age_s} s"
-            elif age_s < 3600:
-                age = f"{age_s // 60} min"
-            else:
-                age = f"{age_s // 3600} h"
-        return {
-            "dest": p.get("dest") or "!fbc48dcb",
-            "last_ok": last_ok,
-            "at": cur.get("t") or p.get("at") or "",
-            "age": age,
-            "fails": fails,
-            "snr_t": cur.get("snr_towards"),
-            "snr_b": cur.get("snr_back"),
-            "hops_t": cur.get("hops_towards"),
-            "hops_b": cur.get("hops_back"),
-            "error": cur.get("error") if last_ok is False else None,
-            "color": color,
-            "hist_t": p.get("hist_t") or [],
-            "hist_snr_t": p.get("hist_snr_towards") or [],
-            "hist_snr_b": p.get("hist_snr_back") or [],
-        }
-    except Exception:
-        return empty
-
-
 def register_funk(app):
     @app.route("/funk")
     def page_funk():
@@ -353,7 +248,6 @@ def register_funk(app):
         base = Path("/home/fmg/prepper-dashboard")
         c1 = _card(base / "mesh1_chutil.json")
         c2 = _card(base / "mesh2_chutil.json")
-        tr = _trace_card(base / "mesh1_traceroute.json")  # meshTraceFunk
         items = []
         for key, card in (("m1", c1), ("m2", c2)):
             m = st.get(key)
@@ -416,7 +310,7 @@ def register_funk(app):
                     card["reply_state"] = (mesh_reply_watch.status(key) or {}).get("state")
                 except Exception:
                     card["reply_state"] = None
-        return render_template_string(PAGE, items=items, c1=c1, c2=c2, tr=tr)
+        return render_template_string(PAGE, items=items, c1=c1, c2=c2)
 
     @app.route("/api/funk/chutil")
     def api_funk_chutil():
