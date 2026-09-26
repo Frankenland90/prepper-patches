@@ -31,7 +31,7 @@ python3 -m py_compile "$BRIDGE"
 
 # Asserts
 grep -q 'def do_POST' "$BRIDGE" || { echo "FAIL: kein def do_POST"; exit 1; }
-grep -qE 'startswith\(["'"'"']/send' "$BRIDGE" || { echo "FAIL: kein /send"; exit 1; }
+grep -qE 'startswith\(["'"'']/send' "$BRIDGE" || { echo "FAIL: kein /send"; exit 1; }
 if grep -nE 'traceroute_run_once|meshTraceManual|target=traceroute_worker' "$BRIDGE"; then
   echo "FAIL: traceroute-Reste in Bridge"
   exit 1
@@ -41,10 +41,23 @@ fi
 sudo systemctl restart mesh-bridge.service 2>/dev/null \
   || sudo systemctl restart mesh-bridge \
   || true
-sleep 2
 systemctl is-active mesh-bridge.service 2>/dev/null \
   || systemctl is-active mesh-bridge \
   || true
+
+READY=0
+for _ in $(seq 1 20); do
+  sleep 1
+  if curl -sf -m 2 "http://127.0.0.1:5001/health" >/dev/null; then
+    READY=1
+    break
+  fi
+done
+if [ "$READY" -ne 1 ]; then
+  journalctl -u mesh-bridge -n 40 --no-pager || true
+  echo "FAIL: mesh-bridge health did not become ready within 20s"
+  exit 1
+fi
 
 echo "--- Verify POST /send ---"
 POST_OUT=$(curl -sS -m 8 -w "\nHTTP_CODE:%{http_code}" \
