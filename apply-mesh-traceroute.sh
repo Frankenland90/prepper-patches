@@ -32,7 +32,7 @@ install -m 0644 /tmp/funk_health.py "$DASH_DIR/funk_health.py"
 install -m 0755 /tmp/patch-mesh-traceroute-bridge.py "$DASH_DIR/patch-mesh-traceroute-bridge.py"
 
 python3 /tmp/patch-mesh-traceroute-bridge.py "$DASH_DIR"
-# Idempotenz: zweiter Lauf darf nicht doppelte Worker einfuegen
+# Idempotenz: zweiter Lauf darf nicht doppelte Worker einfügen
 python3 /tmp/patch-mesh-traceroute-bridge.py "$DASH_DIR"
 
 python3 -m py_compile \
@@ -54,4 +54,4 @@ grep -nE 'meshTraceFunk|Trace ·|tr1|trace-fail|!fbc48dcb' "$DASH_DIR/funk_healt
 
 echo ""
 echo "OK mesh-traceroute applied COMMIT=$COMMIT"
-echo "Probe lebt in mesh-bridge traceroute_worker (stuendlich, bestehendes _iface)."
+echo "Probe lebt in mesh-bridge traceroute_worker (stündlich, bestehendes _iface)."

@@ -7,7 +7,7 @@ MARK = "/* meshTraceBridge */"
 
 WORKER = '''
 def traceroute_worker():  # /* meshTraceBridge */
-    """Stuendlich Traceroute zu TRACE_DEST ueber bestehende _iface-Session (kein 2. TCP)."""
+    """Stündlich Traceroute zu TRACE_DEST über bestehende _iface-Session (kein 2. TCP)."""
     import threading as _threading
 
     def _run_once():
@@ -76,6 +76,7 @@ def traceroute_worker():  # /* meshTraceBridge */
                 return
             pkt = box.get("pkt")
             if pkt is None and box.get("err") is None and not hasattr(iface, "sendData"):
+                # sendTraceRoute ohne onResponse-Paket: als ok ohne SNR werten nur wenn kein Fehler
                 mesh_traceroute.store_result(
                     TRACE_FILE, ok=True, dest=TRACE_DEST, error="no-snr-payload"
                 )
@@ -88,6 +89,7 @@ def traceroute_worker():  # /* meshTraceBridge */
                 log("traceroute: no response", TRACE_DEST)
                 return
             parsed = mesh_traceroute.parse_route_discovery(pkt)
+            # Funktionstest: Antwort innerhalb Timeout = ok
             point = mesh_traceroute.store_result(
                 TRACE_FILE,
                 ok=True,
@@ -115,6 +117,7 @@ def traceroute_worker():  # /* meshTraceBridge */
                 pass
             log("traceroute:", e)
 
+    # erster Lauf nach kurzer Warmup-Pause, dann stündlich
     time.sleep(90)
     while True:
         try:
@@ -137,6 +140,7 @@ def patch_mesh1(path: Path):
 
     needle = "from pathlib import Path\n"
     if needle not in src:
+        # fallback nach mesh_chutil import
         if "import mesh_chutil" in src and "import mesh_traceroute" not in src:
             src = src.replace(
                 "import mesh_chutil",
@@ -149,6 +153,7 @@ def patch_mesh1(path: Path):
         src = src.replace(needle, needle + "import mesh_traceroute  # %s\n" % MARK, 1)
 
     if "TRACE_DEST" not in src:
+        # nach CHUTIL_FILE oder HOLD_MAX
         inserted = False
         for anchor in (
             'CHUTIL_FILE = Path("/home/fmg/prepper-dashboard/mesh1_chutil.json")',
@@ -177,6 +182,7 @@ def patch_mesh1(path: Path):
             raise SystemExit("STOP mesh1: main()")
         src = src.replace("\ndef main():\n", "\n" + WORKER + "def main():\n", 1)
 
+    # Thread-Start: idempotent — nur wenn noch nicht vorhanden
     if "target=traceroute_worker" not in src:
         import re as _re
         m = _re.search(
@@ -197,10 +203,12 @@ def patch_mesh1(path: Path):
         )
         src = src[: m.start()] + insert + src[m.end() :]
 
+    # GET /traceroute
     if "/traceroute" not in src:
         old_get_end = (
             '        self._json(404, {"error": "not found"})\n'
         )
+        # bevorzugt nach /chutil Block
         chutil_end = (
             '                self._json(500, {"ok": False, "error": str(e)})\n'
             "            return\n"
@@ -209,15 +217,15 @@ def patch_mesh1(path: Path):
         insert = (
             '                self._json(500, {"ok": False, "error": str(e)})\n'
             "            return\n"
-            '        if self.path.startswith("/traceroute"):  # %s\n' % MARK
+            '            if self.path.startswith("/traceroute"):  # %s\n' % MARK
             + "            try:\n"
-            "                last = mesh_traceroute.last_sample(TRACE_FILE)\n"
-            "                hist = mesh_traceroute.hist_payload(TRACE_FILE, hours=48)\n"
-            '                self._json(200, {"ok": True, "last": last, "hist": hist})\n'
-            "            except Exception as e:\n"
-            '                self._json(500, {"ok": False, "error": str(e)})\n'
-            "            return\n"
-            '        self._json(404, {"error": "not found"})\n'
+            + "                last = mesh_traceroute.last_sample(TRACE_FILE)\n"
+            + "                hist = mesh_traceroute.hist_payload(TRACE_FILE, hours=48)\n"
+            + '                self._json(200, {"ok": True, "last": last, "hist": hist})\n'
+            + "            except Exception as e:\n"
+            + '                self._json(500, {"ok": False, "error": str(e)})\n'
+            + "            return\n"
+            + '        self._json(404, {"error": "not found"})\n'
         )
         if chutil_end in src:
             src = src.replace(chutil_end, insert, 1)
@@ -226,12 +234,12 @@ def patch_mesh1(path: Path):
                 old_get_end,
                 '        if self.path.startswith("/traceroute"):  # %s\n' % MARK
                 + "            try:\n"
-                "                last = mesh_traceroute.last_sample(TRACE_FILE)\n"
-                "                hist = mesh_traceroute.hist_payload(TRACE_FILE, hours=48)\n"
-                '                self._json(200, {"ok": True, "last": last, "hist": hist})\n'
-                "            except Exception as e:\n"
-                '                self._json(500, {"ok": False, "error": str(e)})\n'
-                "            return\n"
+                + "                last = mesh_traceroute.last_sample(TRACE_FILE)\n"
+                + "                hist = mesh_traceroute.hist_payload(TRACE_FILE, hours=48)\n"
+                + '                self._json(200, {"ok": True, "last": last, "hist": hist})\n'
+                + "            except Exception as e:\n"
+                + '                self._json(500, {"ok": False, "error": str(e)})\n'
+                + "            return\n"
                 + old_get_end,
                 1,
             )
@@ -245,6 +253,7 @@ def patch_mesh1(path: Path):
 def main():
     root = Path(sys.argv[1] if len(sys.argv) > 1 else "/home/fmg/prepper-dashboard")
     patch_mesh1(root / "mesh_bridge.py")
+    # Mesh2 bewusst nicht
 
 
 if __name__ == "__main__":
