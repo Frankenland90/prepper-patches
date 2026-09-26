@@ -63,6 +63,7 @@ if MARKER not in luft:
             "confidence": row.get("confidence"),
             "acq": acq_raw,
             "acq_fmt": acq_fmt,  # firmsList14
+            "gps": f"{lat:.5f}, {lon:.5f}",  # firmsListCopy
             "frp": row.get("frp"),
         })'''
     if OLD_SPOT not in luft:
@@ -224,12 +225,9 @@ body{margin:0;font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;
 {% if lv.nearest %}
 <div class="row"><span>Nächster</span><b>{{ lv.nearest.nearest }} · {{ lv.nearest.nearest_km }} km</b></div>
 {% endif %}
-<div class="small" style="margin-top:8px">Hotspots · GPS · Meldung</div>
+<div class="small" style="margin-top:8px">Hotspots · tippen = kopieren</div>
 {% for h in (lv.hotspots or []) %}
-<div class="row" style="font-size:0.82rem">
-  <span>{{ h.acq_fmt or h.acq or '–' }}{% if h.nearest %} · {{ h.nearest }} {{ h.nearest_km }} km{% endif %}</span>
-  <b>{{ '%.5f'|format(h.lat) if h.lat is not none else '–' }}, {{ '%.5f'|format(h.lon) if h.lon is not none else '–' }}</b>
-</div>
+<div class="firms-line" style="font-size:0.82rem;line-height:1.45;padding:6px 0;border-bottom:1px solid #334155;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;user-select:all;-webkit-user-select:all;word-break:break-all">{{ h.acq_fmt or h.acq or '–' }} · {{ h.gps or '–' }}{% if h.nearest %} · {{ h.nearest }} {{ h.nearest_km }} km{% endif %}</div>
 {% endfor %}
 {% else %}
 <div class="big" style="color:#22c55e">keine</div>
