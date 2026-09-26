@@ -371,7 +371,7 @@ def _ensure_get(src: str) -> str:
             "                hist = mesh_traceroute.hist_payload(TRACE_FILE, hours=48)\n"
             '                self._json(200, {"ok": True, "last": last, "hist": hist})\n'
             "            except Exception as e:\n"
-            '                self._json(500, {"ok": False, "error": str(e)}\n'
+            '                self._json(500, {"ok": False, "error": str(e)})\n'
             "            return\n"
             + old_get_end,
             1,
