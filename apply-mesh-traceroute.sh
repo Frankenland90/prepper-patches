@@ -19,6 +19,19 @@ for f in /tmp/mesh_traceroute.py /tmp/patch-mesh-traceroute-bridge.py /tmp/funk_
     exit 1
   fi
 done
+# funk: kein Manual-Button mehr
+if grep -qE 'Jetzt tracen|runTraceNow|/api/funk/traceroute/run|meshTraceManual' /tmp/funk_health.py; then
+  echo "FAIL: funk_health.py enthält noch Manual-Trace-Button"
+  exit 1
+fi
+# patcher: darf Manual-Pfad strippen, aber kein do_POST traceroute/run mehr einbauen
+if grep -qE 'def do_POST|DO_POST\s*=' /tmp/patch-mesh-traceroute-bridge.py; then
+  # erlauben nur in Strip-/Assert-Kontext, nicht als einzufügender DO_POST-Block
+  if grep -qE "^DO_POST\s*=|^RUN_ONCE\s*=" /tmp/patch-mesh-traceroute-bridge.py; then
+    echo "FAIL: patcher enthält noch DO_POST/RUN_ONCE Insert-Blöcke"
+    exit 1
+  fi
+fi
 grep -q 'PLACEHOLDER' /tmp/mesh_traceroute.py /tmp/patch-mesh-traceroute-bridge.py /tmp/funk_health.py \
   && { echo "FAIL PLACEHOLDER"; exit 1; } || true
 wc -c /tmp/mesh_traceroute.py /tmp/patch-mesh-traceroute-bridge.py /tmp/funk_health.py
@@ -48,11 +61,17 @@ sleep 2
 systemctl is-active mesh-bridge.service prepper-dashboard || true
 
 echo "--- Marker ---"
-grep -nE 'meshTrace|execute_probe|TRACE_DEST|!fbc48dcb' "$DASH_DIR/mesh_traceroute.py" | head -15
-grep -nE 'meshTraceBridge|meshTraceManual|traceroute_run_once|traceroute_worker|TRACE_DEST|!fbc48dcb|/traceroute|do_POST|_trace_busy' "$DASH_DIR/mesh_bridge.py" | head -30
-grep -nE 'meshTraceFunk|meshTraceManual|Jetzt tracen|tr1|trace-fail|!fbc48dcb' "$DASH_DIR/funk_health.py" | head -25
+grep -nE 'meshTrace|TRACE_DEST|!fbc48dcb' "$DASH_DIR/mesh_traceroute.py" | head -15
+grep -nE 'meshTraceBridge|traceroute_worker|TRACE_DEST|!fbc48dcb|/traceroute|sendData' "$DASH_DIR/mesh_bridge.py" | head -30
+# Manual darf NICHT mehr in Bridge/Funk sein
+if grep -nE 'meshTraceManual|Jetzt tracen|runTraceNow|/traceroute/run|def do_POST|_trace_busy|traceroute_run_once' \
+  "$DASH_DIR/mesh_bridge.py" "$DASH_DIR/funk_health.py" 2>/dev/null; then
+  echo "FAIL: Manual-Trace-Reste in Bridge/Funk"
+  exit 1
+fi
+grep -nE 'meshTraceFunk|Trace ·|tr1|trace-fail|!fbc48dcb' "$DASH_DIR/funk_health.py" | head -20
 
 echo ""
 echo "OK mesh-traceroute applied COMMIT=$COMMIT"
-echo "Probe: stündlich traceroute_worker + Button /funk → POST /traceroute/run (bestehendes _iface)."
-echo "Tipp: sendData unter _lock (Fix Manual-Timeout); manuelle Fails zählen nicht für Ampel. Nach Apply Button oder stündlichen Probe abwarten (~60s), dann Reload."
+echo "Probe: stündlich traceroute_worker (fat, sendData unter _lock) → !fbc48dcb. Kein Manual-Button."
+echo "Tipp: nach Apply stündlichen Probe abwarten (~90s Warmup + bis 60s Trace), dann /funk Reload."
