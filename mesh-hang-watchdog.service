@@ -7,9 +7,9 @@ Type=oneshot
 User=fmg
 WorkingDirectory=/home/fmg/prepper-dashboard
 Environment=PYTHONPATH=/home/fmg/prepper-dashboard
-# Detect-only by default. Autorestart only if secrets/mesh_hang_autorestart exists.
-# Optional: Environment=MESH_HANG_WATCHDOG=1
-ExecStart=/usr/bin/python3 /home/fmg/prepper-dashboard/mesh_hang_watchdog.py
+# --apply: Restarts ausführen wenn secrets/mesh_hang_autorestart existiert
+# Ohne Flag bleibt Detect-only. Flag entfernen = Autorestart aus.
+ExecStart=/usr/bin/python3 /home/fmg/prepper-dashboard/mesh_hang_watchdog.py --apply
 Nice=10
 
 [Install]
