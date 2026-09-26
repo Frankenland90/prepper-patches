@@ -97,12 +97,20 @@ def _systemctl_restart(units: list[str], dry_run: bool) -> list[str]:
             done.append(u)
             continue
         try:
+            # Prefer passwordless sudo (Pi polkit/sudoers); fall back to plain systemctl
             r = subprocess.run(
-                ["systemctl", "restart", u],
+                ["sudo", "-n", "systemctl", "restart", u],
                 capture_output=True,
                 text=True,
                 timeout=60,
             )
+            if r.returncode != 0:
+                r = subprocess.run(
+                    ["systemctl", "restart", u],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
             if r.returncode == 0:
                 log(f"restarted {u}")
                 done.append(u)
@@ -128,15 +136,14 @@ def evaluate_one(mesh_key: str, cfg: dict) -> dict:
 
     recommend_restart = False
     reason = None
+    # Telemetrie-Hang allein reicht (Chart-Flatline); Reply-Stumm verstärkt nur die Reason
     if stuck and stuck_sec >= STUCK_ACTION_SEC:
-        if silent or reply_state == "stumm" or (
-            reply_state == "unbekannt" and stuck
-        ):
-            recommend_restart = True
-            reason = (
-                f"stuck {stuck_sec}s (>= {STUCK_ACTION_SEC}) + reply {reply_state}"
-                + (" silent" if silent else "")
-            )
+        recommend_restart = True
+        reason = f"stuck {stuck_sec}s (>= {STUCK_ACTION_SEC})"
+        if silent or reply_state == "stumm":
+            reason += f" + reply {reply_state}" + (" silent" if silent else "")
+        elif reply_state == "unbekannt":
+            reason += " + reply unbekannt"
 
     return {
         "mesh": mesh_key,
