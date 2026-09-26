@@ -227,3 +227,107 @@ def store_result(
             "error": error,
         },
     )
+
+def execute_probe(
+    iface,
+    *,
+    dest: str = TRACE_DEST_DEFAULT,
+    path: Path | None = None,
+    timeout: float = 60,
+    hop_limit: int = 5,
+    channel_index: int = 0,
+    log_fn=None,
+) -> dict:
+    """Ein Trace über bestehende iface-Session. # meshTraceManual"""
+    import threading
+
+    path = Path(path or DEFAULT_FILE)
+    log = log_fn or (lambda *a: None)
+    if not iface:
+        return store_result(path, ok=False, dest=dest, error="no iface")
+
+    done = threading.Event()
+    box = {"pkt": None, "err": None}
+
+    def _on_resp(pkt):
+        box["pkt"] = pkt
+        done.set()
+
+    try:
+        try:
+            from meshtastic import mesh_pb2, portnums_pb2
+
+            r = mesh_pb2.RouteDiscovery()
+            port = portnums_pb2.PortNum.TRACEROUTE_APP
+        except Exception:
+            r = None
+            port = 70
+
+        if r is not None and hasattr(iface, "sendData"):
+            iface.sendData(
+                r,
+                destinationId=dest,
+                portNum=port,
+                wantResponse=True,
+                onResponse=_on_resp,
+                channelIndex=channel_index,
+                hopLimit=hop_limit,
+            )
+        elif hasattr(iface, "sendTraceRoute"):
+
+            def _send():
+                try:
+                    iface.sendTraceRoute(dest, hop_limit, channelIndex=channel_index)
+                except Exception as e:
+                    box["err"] = str(e)
+                finally:
+                    done.set()
+
+            threading.Thread(target=_send, daemon=True).start()
+        else:
+            raise RuntimeError("kein sendData/sendTraceRoute")
+
+        if not done.wait(timeout):
+            point = store_result(path, ok=False, dest=dest, error="timeout")
+            log("traceroute: timeout", dest)
+            return point
+        if box.get("err"):
+            point = store_result(path, ok=False, dest=dest, error=str(box["err"]))
+            log("traceroute:", box["err"])
+            return point
+        pkt = box.get("pkt")
+        if pkt is None and not hasattr(iface, "sendData"):
+            point = store_result(path, ok=True, dest=dest, error="no-snr-payload")
+            log("traceroute: ok (kein Payload)", dest)
+            return point
+        if pkt is None:
+            point = store_result(path, ok=False, dest=dest, error="no response")
+            log("traceroute: no response", dest)
+            return point
+        parsed = parse_route_discovery(pkt)
+        point = store_result(
+            path,
+            ok=True,
+            dest=dest,
+            snr_towards=parsed.get("snr_towards"),
+            snr_back=parsed.get("snr_back"),
+            hops_towards=parsed.get("hops_towards"),
+            hops_back=parsed.get("hops_back"),
+            payload=pkt,
+        )
+        log(
+            "traceroute ok",
+            dest,
+            "snr_t",
+            point.get("snr_towards"),
+            "snr_b",
+            point.get("snr_back"),
+        )
+        return point
+    except Exception as e:
+        try:
+            point = store_result(path, ok=False, dest=dest, error=str(e))
+        except Exception:
+            point = {"ok": False, "error": str(e)}
+        log("traceroute:", e)
+        return point
