@@ -239,52 +239,52 @@ def _ensure_do_post(src: str) -> str:
         # Already has traceroute POST handling?
         if "/traceroute/run" in src or 'startswith("/traceroute")' in src:
             # Check do_POST body mentions traceroute
-            m = re.search(r"(?ms)^[ \\t]*def do_POST\\(self\\):.*?(?=^[ \\t]*def |\\Z)", src)
+            m = re.search(r"(?ms)^[ \t]*def do_POST\(self\):.*?(?=^[ \t]*def |\Z)", src)
             if m and "traceroute" in m.group(0):
                 return src
     if "def do_POST(self):" in src:
         # Existing do_POST without traceroute — inject at start of method
-        m = re.search(r"(?m)^([ \\t]*)def do_POST\\(self\\):\\s*\\n", src)
+        m = re.search(r"(?m)^([ \t]*)def do_POST\(self\):\s*\n", src)
         if not m:
             raise SystemExit("STOP mesh1: do_POST Anker")
         ind = m.group(1)
         inject = (
             m.group(0)
             + ind
-            + "    global _trace_busy  # %s\\n" % MARK_M
+            + "    global _trace_busy  # %s\n" % MARK_M
             + ind
-            + '    _tp = (self.path or "").split("?", 1)[0]\\n'
+            + '    _tp = (self.path or "").split("?", 1)[0]\n'
             + ind
-            + '    if _tp in ("/traceroute", "/traceroute/run") or _tp.startswith("/traceroute"):\\n'
+            + '    if _tp in ("/traceroute", "/traceroute/run") or _tp.startswith("/traceroute"):\n'
             + ind
-            + "        if _trace_busy:\\n"
+            + "        if _trace_busy:\n"
             + ind
-            + '            self._json(409, {"ok": False, "started": False, "dest": TRACE_DEST})\\n'
+            + '            self._json(409, {"ok": False, "started": False, "dest": TRACE_DEST})\n'
             + ind
-            + "            return\\n"
+            + "            return\n"
             + ind
-            + "        _trace_busy = True\\n"
+            + "        _trace_busy = True\n"
             + ind
-            + "        threading.Thread(target=traceroute_run_once, daemon=True).start()\\n"
+            + "        threading.Thread(target=traceroute_run_once, daemon=True).start()\n"
             + ind
-            + '        self._json(202, {"ok": True, "started": True, "dest": TRACE_DEST})\\n'
+            + '        self._json(202, {"ok": True, "started": True, "dest": TRACE_DEST})\n'
             + ind
-            + "        return\\n"
+            + "        return\n"
         )
         return src[: m.start()] + inject + src[m.end() :]
 
     # Insert after do_GET's trailing 404
-    anchor = '        self._json(404, {"error": "not found"})\\n'
+    anchor = '        self._json(404, {"error": "not found"})\n'
     # Prefer the do_GET final 404 (last occurrence before traceroute_worker / main)
     idx = src.rfind(anchor)
     if idx < 0:
         # fallback: after do_GET def block ending
-        m = re.search(r"(?ms)^([ \\t]*)def do_GET\\(self\\):.*?\\n(?=[ \\t]*def |\\Z)", src)
+        m = re.search(r"(?ms)^([ \t]*)def do_GET\(self\):.*?\n(?=[ \t]*def |\Z)", src)
         if not m:
             print("mesh1 WARN: do_POST Anker fehlt")
             return src
         return src[: m.end()] + DO_POST + src[m.end() :]
-    return src[: idx + len(anchor)] + "\\n" + DO_POST + src[idx + len(anchor) :]
+    return src[: idx + len(anchor)] + "\n" + DO_POST + src[idx + len(anchor) :]
 
 
 def patch_mesh1(path: Path):
