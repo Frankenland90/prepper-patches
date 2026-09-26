@@ -137,13 +137,8 @@ body{margin:0;font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;
     <div>Hops zurück <b>{% if tr.hops_b is not none %}{{ tr.hops_b }}{% else %}–{% endif %}</b></div>
   </div>
   {% if tr.error %}<div class="hint red">{{ tr.error }}</div>{% endif %}
-  <div style="margin:8px 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-    <button id="traceBtn" type="button" onclick="runTraceNow()"
-      style="padding:6px 12px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#e2e8f0;cursor:pointer;font-size:0.85rem">Jetzt tracen</button>
-    <span id="traceStatus" class="small" style="margin:0"></span>
-  </div>
   <div class="chart-wrap"><canvas id="tr1"></canvas></div>
-  <div class="small">48h · SNR hin / SNR zurück (dB) · stündlich · LongFast · Button = Sofort-Probe</div>
+  <div class="small">48h · SNR hin / SNR zurück (dB) · stündlich · LongFast</div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -185,27 +180,6 @@ mk('ch2', {{ c2.hist_t|tojson }}, {{ c2.hist_ch|tojson }}, {{ c2.hist_tx|tojson 
       }}
   });
 })();
-async function runTraceNow(){  // meshTraceManual
-  const btn=document.getElementById('traceBtn');
-  const st=document.getElementById('traceStatus');
-  if(btn){btn.disabled=true;btn.style.opacity='0.6';}
-  if(st) st.textContent='Trace gestartet…';
-  try{
-    const r=await fetch('/api/funk/traceroute/run',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
-    let d={};
-    try{d=await r.json();}catch(_e){}
-    if(r.status===409){
-      if(st) st.textContent='Bereits aktiv – warte auf Ergebnis…';
-    }else if(d.ok || r.status===202){
-      if(st) st.textContent='Läuft (~60s)… Seite lädt danach neu';
-    }else{
-      if(st) st.textContent='Fehler: '+(d.error||('HTTP '+r.status));
-    }
-  }catch(e){
-    if(st) st.textContent='Verbindung fehlgeschlagen';
-  }
-  setTimeout(function(){ location.reload(); }, 70000);
-}
 </script>
 </body></html>
 """
@@ -451,37 +425,4 @@ def register_funk(app):
             "m1": _card(base / "mesh1_chutil.json"),
             "m2": _card(base / "mesh2_chutil.json"),
         })
-
-    @app.route("/api/funk/traceroute/run", methods=["POST"])
-    def api_funk_traceroute_run():  # meshTraceManual
-        """Proxy Sofort-Trace an Mesh1-Bridge (kein 2. TCP zum Node)."""
-        import urllib.error
-        import urllib.request
-
-        url = "http://127.0.0.1:5001/traceroute/run"
-        try:
-            req = urllib.request.Request(
-                url,
-                data=b"{}",
-                method="POST",
-                headers={"Content-Type": "application/json"},
-            )
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                body = resp.read().decode("utf-8", "replace")
-                code = getattr(resp, "status", None) or resp.getcode()
-            try:
-                data = json.loads(body)
-            except Exception:
-                data = {"ok": True, "started": True, "raw": body}
-            return jsonify(data), int(code)
-        except urllib.error.HTTPError as e:
-            try:
-                data = json.loads(e.read().decode("utf-8", "replace"))
-            except Exception:
-                data = {"ok": False, "started": False, "error": str(e.reason)}
-            return jsonify(data), int(e.code)
-        except Exception as e:
-            return jsonify({"ok": False, "started": False, "error": str(e)}), 502
-
-
 
