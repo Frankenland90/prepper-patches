@@ -48,10 +48,11 @@ sleep 2
 systemctl is-active mesh-bridge.service prepper-dashboard || true
 
 echo "--- Marker ---"
-grep -nE 'meshTrace|traceroute_worker|TRACE_DEST|!fbc48dcb' "$DASH_DIR/mesh_traceroute.py" | head -15
-grep -nE 'meshTraceBridge|traceroute_worker|TRACE_DEST|!fbc48dcb|/traceroute' "$DASH_DIR/mesh_bridge.py" | head -25
-grep -nE 'meshTraceFunk|Trace ·|tr1|trace-fail|!fbc48dcb' "$DASH_DIR/funk_health.py" | head -20
+grep -nE 'meshTrace|execute_probe|TRACE_DEST|!fbc48dcb' "$DASH_DIR/mesh_traceroute.py" | head -15
+grep -nE 'meshTraceBridge|meshTraceManual|traceroute_run_once|traceroute_worker|TRACE_DEST|!fbc48dcb|/traceroute|do_POST|_trace_busy' "$DASH_DIR/mesh_bridge.py" | head -30
+grep -nE 'meshTraceFunk|meshTraceManual|Jetzt tracen|tr1|trace-fail|!fbc48dcb' "$DASH_DIR/funk_health.py" | head -25
 
 echo ""
 echo "OK mesh-traceroute applied COMMIT=$COMMIT"
-echo "Probe lebt in mesh-bridge traceroute_worker (stündlich, bestehendes _iface)."
+echo "Probe: stündlich traceroute_worker + Button /funk → POST /traceroute/run (bestehendes _iface)."
+echo "Tipp: nach Apply ersten Probe abwarten oder 'Jetzt tracen'; Ergebnis ~60s, dann Reload zeigt SNR."
