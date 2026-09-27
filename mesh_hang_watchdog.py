@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mesh Hang Watchdog: stuck Telemetrie + Reply-Stumm → Status JSON, optional Restart. # meshHang"""
+"""Mesh Hang Watchdog: stuck Telemetrie + Reply-Stumm → Status JSON, optional Restart. # meshHang # meshHangRetry"""
 from __future__ import annotations
 
 import argparse
@@ -17,7 +17,10 @@ LOG_FILE = BASE / "mesh_hang_watchdog.log"
 AUTORESTART_FLAG = BASE / "secrets" / "mesh_hang_autorestart"
 
 STUCK_ACTION_SEC = 2700  # 45 min
-COOLDOWN_SEC = 2 * 3600  # 2h
+COOLDOWN_SEC = 2 * 3600  # 2h nach mehreren Retries / Normalpause
+COOLDOWN_RETRY_SEC = 25 * 60  # 25 min Zweitversuch solange noch stuck
+MAX_QUICK_RETRIES = 4  # Versuche 1..4 im Stuck-Episode: 25-Min-Abstand; danach wieder 2h
+# meshHangRetry
 
 MESHES = {
     "m1": {
@@ -63,23 +66,69 @@ def _save_json(path: Path, data) -> None:
     tmp.replace(path)
 
 
-def _cooldown_ok(mesh_key: str) -> bool:
+def _cooldown_entry(mesh_key: str) -> tuple[float, int]:
+    """Return (last_restart_ts, attempt_count). Legacy float → n=1."""
     d = _load_json(COOLDOWN_FILE, {})
     if not isinstance(d, dict):
-        d = {}
-    last = d.get(mesh_key)
+        return 0.0, 0
+    v = d.get(mesh_key)
+    if v is None:
+        return 0.0, 0
+    if isinstance(v, dict):
+        try:
+            ts = float(v.get("ts") or 0)
+        except Exception:
+            ts = 0.0
+        try:
+            n = int(v.get("n") or 0)
+        except Exception:
+            n = 0
+        return ts, n
     try:
-        last = float(last) if last is not None else 0.0
+        return float(v), 1
     except Exception:
-        last = 0.0
-    return (time.time() - last) >= COOLDOWN_SEC
+        return 0.0, 0
+
+
+def _cooldown_need_sec(attempt_n: int) -> int:
+    # n = already completed restarts in this stuck episode
+    if 1 <= attempt_n < MAX_QUICK_RETRIES:
+        return COOLDOWN_RETRY_SEC
+    if attempt_n >= MAX_QUICK_RETRIES:
+        return COOLDOWN_SEC
+    return 0
+
+
+def _cooldown_ok(mesh_key: str) -> bool:
+    last, n = _cooldown_entry(mesh_key)
+    if not last:
+        return True
+    need = _cooldown_need_sec(n) or COOLDOWN_RETRY_SEC
+    return (time.time() - last) >= need
+
+
+def _cooldown_remaining_sec(mesh_key: str) -> int:
+    last, n = _cooldown_entry(mesh_key)
+    if not last:
+        return 0
+    need = _cooldown_need_sec(n) or COOLDOWN_RETRY_SEC
+    return max(0, int(need - (time.time() - last)))
 
 
 def _mark_cooldown(mesh_key: str) -> None:
     d = _load_json(COOLDOWN_FILE, {})
     if not isinstance(d, dict):
         d = {}
-    d[mesh_key] = time.time()
+    _last, n = _cooldown_entry(mesh_key)
+    d[mesh_key] = {"ts": time.time(), "n": n + 1}
+    _save_json(COOLDOWN_FILE, d)
+
+
+def _clear_cooldown_episode(mesh_key: str) -> None:
+    d = _load_json(COOLDOWN_FILE, {})
+    if not isinstance(d, dict) or mesh_key not in d:
+        return
+    d.pop(mesh_key, None)
     _save_json(COOLDOWN_FILE, d)
 
 
@@ -185,21 +234,36 @@ def run(dry_run: bool = True, enable_restart: bool = False) -> dict:
             log(f"{key} evaluate error: {e}")
         results[key] = info
 
-        if info.get("recommend_restart"):
+        if not info.get("recommend_restart"):
+            # Episode vorbei → Zähler zurück, nächster Hang startet frisch
+            _clear_cooldown_episode(key)
+        elif info.get("recommend_restart"):
             log(f"{key}: EMPFEHLUNG Restart — {info.get('reason')}")
+            _last, n_done = _cooldown_entry(key)
+            info["restart_attempts"] = n_done
             if allow_restart and not dry_run:
                 if not _cooldown_ok(key):
-                    log(f"{key}: cooldown aktiv — kein Restart")
+                    rem = _cooldown_remaining_sec(key)
+                    need = _cooldown_need_sec(n_done) or COOLDOWN_RETRY_SEC
+                    log(
+                        f"{key}: cooldown aktiv — kein Restart "
+                        f"(Versuch {n_done}, Pause {need // 60} min, frei in {rem // 60} min)"
+                    )
                     info["action"] = "cooldown"
+                    info["cooldown_remaining_sec"] = rem
+                    info["cooldown_need_sec"] = need
                 else:
                     units = [cfg["bridge_svc"]]
                     # ping reply if unit exists
                     units.append(cfg["ping_svc"])
                     done = _systemctl_restart(units, dry_run=False)
                     _mark_cooldown(key)
+                    _last2, n2 = _cooldown_entry(key)
+                    log(f"{key}: Restart ausgeführt (Versuch {n2})")
                     info["action"] = "restarted"
                     info["restarted"] = done
-                    actions.append({"mesh": key, "units": done})
+                    info["restart_attempts"] = n2
+                    actions.append({"mesh": key, "units": done, "attempt": n2})
             elif allow_restart and dry_run:
                 log(f"{key}: DRY-RUN Restart {cfg['bridge_svc']} + {cfg['ping_svc']}")
                 info["action"] = "dry-run"
@@ -239,7 +303,18 @@ def main():
         action="store_true",
         help="Restarts erlauben auch ohne Flag-Datei (vorsichtig)",
     )
+    ap.add_argument(
+        "--force",
+        action="store_true",
+        help="Cooldown ignorieren (sofortiger Restart-Versuch bei Empfohlen)",
+    )
     args = ap.parse_args()
+    if args.force:
+        # Cooldown-Episoden leeren → nächster --apply startet sofort
+        d = _load_json(COOLDOWN_FILE, {})
+        if isinstance(d, dict) and d:
+            _save_json(COOLDOWN_FILE, {})
+            log("cooldown geleert (--force)")
     dry = True
     if args.apply and not args.dry_run:
         dry = False
