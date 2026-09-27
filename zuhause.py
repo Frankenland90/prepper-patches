@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Zuhause: Abfall ERH Käswasser + Notrufe + Tierkliniken. # zuhausePage # zuhauseJinjaFix # zuhauseCacheFix"""
+"""Zuhause: Abfall ERH Käswasser + Notrufe + Tierkliniken. # zuhausePage # zuhauseJinjaFix # zuhauseCacheFix # zuhausePolizeiPI"""
 from __future__ import annotations
 
 import json
@@ -57,6 +57,11 @@ EMERGENCY = [
         "entries": [
             {"name": "Feuerwehr / Rettung", "phone": "112", "hint": "Leben, Brand, Unfall"},
             {"name": "Polizei", "phone": "110", "hint": ""},
+            {
+                "name": "Polizeiinspektion Erlangen-Land",
+                "phone": "09131 98842-0",
+                "hint": "Ersatz bei 110-Ausfall · Gräfenberger Str. 41, Uttenreuth",
+            },
             {"name": "Ärztlicher Bereitschaftsdienst", "phone": "116117", "hint": "ohne Notarzt"},
             {"name": "Giftnotruf Bayern", "phone": "089 19240", "hint": "München"},
         ],
