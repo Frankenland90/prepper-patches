@@ -19,6 +19,7 @@ PAGES = [
     "/luft",
     "/pegel",
     "/adsb",
+    "/zuhause",
     "/mesh",
     "/mesh2",
     "/news",
