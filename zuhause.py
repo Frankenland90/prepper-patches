@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Zuhause: Abfall ERH Käswasser + Notrufe + Tierkliniken. # zuhausePage"""
+"""Zuhause: Abfall ERH Käswasser + Notrufe + Tierkliniken. # zuhausePage # zuhauseJinjaFix"""
 from __future__ import annotations
 
 import json
@@ -54,7 +54,7 @@ VETS = [
 EMERGENCY = [
     {
         "group": "Notruf",
-        "items": [
+        "entries": [
             {"name": "Feuerwehr / Rettung", "phone": "112", "hint": "Leben, Brand, Unfall"},
             {"name": "Polizei", "phone": "110", "hint": ""},
             {"name": "Ärztlicher Bereitschaftsdienst", "phone": "116117", "hint": "ohne Notarzt"},
@@ -63,7 +63,7 @@ EMERGENCY = [
     },
     {
         "group": "Gemeinde & Landkreis",
-        "items": [
+        "entries": [
             {
                 "name": "Gemeinde Kalchreuth (Rathaus)",
                 "phone": "0911 518344-0",
@@ -78,14 +78,14 @@ EMERGENCY = [
     },
     {
         "group": "Energie & Versorgung",
-        "items": [
+        "entries": [
             {"name": "N-ERGIE Störung Strom", "phone": "0800 4442000", "hint": "kostenfrei"},
             {"name": "N-ERGIE Kundenservice", "phone": "0911 80253000", "hint": ""},
         ],
     },
     {
         "group": "Abfall",
-        "items": [
+        "entries": [
             {
                 "name": "Veolia Restmüll-Reklamation",
                 "phone": "0911 94577669",
@@ -348,7 +348,7 @@ def page_template(base_style: str) -> str:
     {% for g in z.emergency or [] %}
     <div style="margin-top:12px">
       <div class="small" style="color:#93c5fd;font-weight:600">{{ g.group }}</div>
-      {% for it in g.items %}
+      {% for it in g.entries %}
       <div style="display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid #1e293b;align-items:baseline">
         <div>
           <div>{{ it.name }}</div>
