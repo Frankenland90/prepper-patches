@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Zuhause: Abfall ERH Käswasser + Notrufe + Tierkliniken. # zuhausePage # zuhauseJinjaFix"""
+"""Zuhause: Abfall ERH Käswasser + Notrufe + Tierkliniken. # zuhausePage # zuhauseJinjaFix # zuhauseCacheFix"""
 from __future__ import annotations
 
 import json
@@ -229,7 +229,19 @@ def load_or_refresh(force: bool = False) -> dict:
     if not force and CACHE.exists():
         try:
             data = json.loads(CACHE.read_text(encoding="utf-8"))
-            if time.time() - float(data.get("ts") or 0) < CACHE_MAX_AGE_SEC:
+            age_ok = time.time() - float(data.get("ts") or 0) < CACHE_MAX_AGE_SEC
+            em = data.get("emergency") or []
+            # alter Cache hatte key "items" — Jinja braucht "entries"
+            has_entries = bool(em) and all(
+                isinstance(g, dict) and (g.get("entries") or g.get("items"))
+                for g in em
+            )
+            if age_ok and has_entries:
+                # migrate items -> entries in memory
+                for g in em:
+                    if "entries" not in g and "items" in g:
+                        g["entries"] = g.pop("items")
+                data["emergency"] = em
                 return data
         except Exception:
             pass
@@ -348,7 +360,7 @@ def page_template(base_style: str) -> str:
     {% for g in z.emergency or [] %}
     <div style="margin-top:12px">
       <div class="small" style="color:#93c5fd;font-weight:600">{{ g.group }}</div>
-      {% for it in g.entries %}
+      {% for it in (g.get('entries') or g.get('items') or []) %}
       <div style="display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid #1e293b;align-items:baseline">
         <div>
           <div>{{ it.name }}</div>
