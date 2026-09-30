@@ -37,35 +37,14 @@ NEW_HTML = (
 )
 must_replace(OLD_HTML, NEW_HTML, "html hilo")
 
+# Kurzer Anker wie diesel-hilo — Chart-Body (if canvas / € / Optionen) kann auf dem Pi abweichen
 OLD_JS = (
-    "const oilHist = {{ oil_history | tojson }};\n"
-    "(function(){\n"
     "  const vals = oilHist.map(x=>x.v).filter(v=>v!=null);\n"
     "  const dMin = vals.length ? Math.min(...vals) : 50;\n"
     "  const dMax = vals.length ? Math.max(...vals) : 120;\n"
     "  const canvas = document.getElementById('oilChart');\n"
-    "  if (canvas == null) return;\n"
-    "  new Chart(canvas.getContext('2d'), {\n"
-    "    type: 'line',\n"
-    "    data: { labels: oilHist.map(x=>x.t), datasets: [{ data: oilHist.map(x=>x.v), borderColor: '#f59e0b', backgroundColor: '#f59e0b22', borderWidth: 2, pointRadius: 0, fill: true, tension: 0.3 }] },\n"
-    "    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },\n"
-    "      scales: {\n"
-    "        x: { display: true, ticks: { color: '#64748b', font: { size: 8 }, maxRotation: 0, maxTicksLimit: 5 }, grid: { display: false } },\n"
-    "        y: { display: true, min: dMin === dMax ? dMin-1 : dMin, max: dMin === dMax ? dMax+1 : dMax,\n"
-    "          ticks: { color: '#64748b', font: { size: 8 }, maxTicksLimit: 2,\n"
-    "            callback: function(v) {\n"
-    "              if (Math.abs(v - dMin) < 1e-6) return dMin.toFixed(2) + ' €';\n"
-    "              if (Math.abs(v - dMax) < 1e-6) return dMax.toFixed(2) + ' €';\n"
-    "              return '';\n"
-    "            } },\n"
-    "          grid: { color: '#1e293b' } }\n"
-    "      }, animation: false }\n"
-    "  });\n"
-    "})();\n"
 )
 NEW_JS = (
-    "const oilHist = {{ oil_history | tojson }};\n"
-    "(function(){\n"
     "  const vals = oilHist.map(x=>x.v).filter(v=>v!=null);\n"
     "  const dMin = vals.length ? Math.min(...vals) : 50;\n"
     "  const dMax = vals.length ? Math.max(...vals) : 120;\n"
@@ -81,24 +60,6 @@ NEW_JS = (
     "  if (hiEl && hiPt) hiEl.textContent = (hiPt.t || '–') + ' · ' + Number(hiPt.v).toFixed(2) + ' €';\n"
     "  if (loEl && loPt) loEl.textContent = (loPt.t || '–') + ' · ' + Number(loPt.v).toFixed(2) + ' €';\n"
     "  const canvas = document.getElementById('oilChart');\n"
-    "  if (canvas == null) return;\n"
-    "  new Chart(canvas.getContext('2d'), {\n"
-    "    type: 'line',\n"
-    "    data: { labels: oilHist.map(x=>x.t), datasets: [{ data: oilHist.map(x=>x.v), borderColor: '#f59e0b', backgroundColor: '#f59e0b22', borderWidth: 2, pointRadius: 0, fill: true, tension: 0.3 }] },\n"
-    "    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },\n"
-    "      scales: {\n"
-    "        x: { display: true, ticks: { color: '#64748b', font: { size: 8 }, maxRotation: 0, maxTicksLimit: 5 }, grid: { display: false } },\n"
-    "        y: { display: true, min: dMin === dMax ? dMin-1 : dMin, max: dMin === dMax ? dMax+1 : dMax,\n"
-    "          ticks: { color: '#64748b', font: { size: 8 }, maxTicksLimit: 2,\n"
-    "            callback: function(v) {\n"
-    "              if (Math.abs(v - dMin) < 1e-6) return dMin.toFixed(2) + ' €';\n"
-    "              if (Math.abs(v - dMax) < 1e-6) return dMax.toFixed(2) + ' €';\n"
-    "              return '';\n"
-    "            } },\n"
-    "          grid: { color: '#1e293b' } }\n"
-    "      }, animation: false }\n"
-    "  });\n"
-    "})();\n"
 )
 must_replace(OLD_JS, NEW_JS, "js hilo")
 
