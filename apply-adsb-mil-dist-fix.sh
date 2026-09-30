@@ -16,11 +16,15 @@ if ! grep -q 'milDistFix' /tmp/patch-adsb-mil-dist-fix.py; then
   head -8 /tmp/patch-adsb-mil-dist-fix.py
   exit 1
 fi
-wc -c /tmp/patch-adsb-mil-dist-fix.py
+# zb64 sibling for stub loader (also try curl)
+curl -fsSL "$BASE/patch-adsb-mil-dist-fix.zb64" -o /tmp/patch-adsb-mil-dist-fix.zb64
+cp -a /tmp/patch-adsb-mil-dist-fix.zb64 /tmp/ 2>/dev/null || true
+# stub resolves sibling next to __file__; keep both in /tmp
+wc -c /tmp/patch-adsb-mil-dist-fix.py /tmp/patch-adsb-mil-dist-fix.zb64
 
 cp -a "$DASH" "$DASH.bak-mil-dist-fix-$TS" 2>/dev/null || true
+export COMMIT
 python3 /tmp/patch-adsb-mil-dist-fix.py "$DASH"
-# idempotent re-run
 python3 /tmp/patch-adsb-mil-dist-fix.py "$DASH"
 python3 -m py_compile "$DASH"
 
