@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-COMMIT="${COMMIT:-REPLACE_ME}"
+COMMIT="${COMMIT:-5761735cfd1ffbd3a7da9c2bdb36bb634a5589ee}"
 BASE="https://raw.githubusercontent.com/Frankenland90/prepper-patches/${COMMIT}"
 DASH_DIR="/home/fmg/prepper-dashboard"
 DASH="$DASH_DIR/dashboard.py"
