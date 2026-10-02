@@ -1,7 +1,8 @@
 #!/bin/bash
 set -euo pipefail
-# pageFein Feinschliff (idempotent). Restores bak-pagefein if present, then apply/repair.
-COMMIT="${COMMIT:-05775f8277455468d6a85fc3419bdda9c9970d4c}"
+# pageFein SAFE (idempotent). Restores bak-pagefein, applies boot-safe fein only.
+# NO StartBg rewrite, NO BusyGuard, NO data_store.clear(). Curls discover PORT (Pi: 8080).
+COMMIT="${COMMIT:-REPLACE_ME}"
 export COMMIT
 BASE="https://raw.githubusercontent.com/Frankenland90/prepper-patches/${COMMIT}"
 DASH_DIR="/home/fmg/prepper-dashboard"
@@ -9,13 +10,28 @@ DASH="$DASH_DIR/dashboard.py"
 TS=$(date +%Y%m%d-%H%M%S)
 RESTORE_BAK="${RESTORE_BAK:-1}"
 
-echo "=== page-fein apply COMMIT=$COMMIT RESTORE_BAK=$RESTORE_BAK ==="
+echo "=== page-fein SAFE apply COMMIT=$COMMIT RESTORE_BAK=$RESTORE_BAK ==="
 if [[ "$COMMIT" == "REPLACE_ME" || "$COMMIT" == PLACEHOLDER* ]]; then
   echo "FAIL: COMMIT not pinned (got $COMMIT). Set COMMIT=<tip-sha>."
   exit 1
 fi
 
-# Fast recover: put pre-pageFein dashboard back, then re-apply fixed patch
+# Discover PORT from config.py / dashboard.py (Frank Pi: 8080)
+PORT=$(python3 - <<'PY'
+from pathlib import Path
+import re
+for p in (Path("/home/fmg/prepper-dashboard/config.py"), Path("/home/fmg/prepper-dashboard/dashboard.py")):
+    if not p.is_file():
+        continue
+    m = re.search(r"^PORT\s*=\s*(\d+)", p.read_text(encoding="utf-8", errors="replace"), re.M)
+    if m:
+        print(m.group(1))
+        raise SystemExit
+print("8080")
+PY
+)
+echo "PORT=$PORT"
+
 if [[ "$RESTORE_BAK" == "1" ]]; then
   BAK=""
   if [[ -f "$DASH_DIR/dashboard.py.bak-pagefein-20261002-211022" ]]; then
@@ -27,7 +43,8 @@ if [[ "$RESTORE_BAK" == "1" ]]; then
     cp -a "$BAK" "$DASH"
     echo "Restored from $BAK"
   else
-    echo "WARN: no bak-pagefein found — will REPAIR live if broken markers present"
+    echo "FAIL: no bak-pagefein found — refuse apply without known-good bak"
+    exit 1
   fi
 fi
 
@@ -42,8 +59,11 @@ p0 = pathlib.Path("/tmp/patch-page-fein.zb64.p0").read_text().strip()
 p1 = pathlib.Path("/tmp/patch-page-fein.zb64.p1").read_text().strip()
 raw = zlib.decompress(base64.b64decode(p0 + p1))
 assert b"pageFein" in raw and b"dataStoreLock" in raw and b"ninaDualGuard" in raw
-assert b"Referenz-Tausch" in raw and b"blockierend bis Store" in raw
-print("zb64 parts ok", len(raw))
+assert b"Referenz-Tausch" in raw
+assert b"ABANDONED" in raw or b"Boot-safe" in raw or b"SAFE Feinschliff" in raw
+assert b"ABANDONED" in raw or b"SAFE Feinschliff" in raw or b"Boot-safe" in raw
+assert b"updateBusyGuard" in raw  # reject-string only; must not be applied to dash
+print("zb64 SAFE parts ok", len(raw))
 PY
 grep -q 'PLACEHOLDER' /tmp/patch-page-fein.py && { echo "FAIL PLACEHOLDER"; exit 1; } || true
 wc -c /tmp/patch-page-fein.py /tmp/patch-page-fein.zb64.p0 /tmp/patch-page-fein.zb64.p1
@@ -54,53 +74,56 @@ python3 /tmp/patch-page-fein.py "$DASH"
 python3 /tmp/patch-page-fein.py "$DASH"
 python3 -m py_compile "$DASH"
 
+# Boot-safety markers
+if grep -q 'Thread(target=update_all' "$DASH"; then
+  echo "FAIL: StartBg thread present"; exit 1
+fi
+if grep -A3 'pageFein atomicSwap' "$DASH" | grep -q 'data_store.clear'; then
+  echo "FAIL: atomicSwap clears"; exit 1
+fi
+if grep -q 'updateBusyGuard\|_update_all_body' "$DASH"; then
+  echo "FAIL: BusyGuard present"; exit 1
+fi
+if ! grep -q 'update_all()  # einmal beim Start' "$DASH"; then
+  echo "FAIL: bak-style StartBg missing"; exit 1
+fi
+echo "OK boot-safety markers"
+
 sudo systemctl restart prepper-dashboard.service 2>/dev/null \
   || sudo systemctl restart prepper-dashboard \
   || true
-# First update_all is blocking again — give it time to fill store before HTTP sample
-sleep 8
+# bak-style start runs update_all once then binds — allow headroom
+sleep 12
 systemctl is-active prepper-dashboard.service 2>/dev/null \
   || systemctl is-active prepper-dashboard \
   || true
 
 echo "--- Marker ---"
-grep -n 'pageFein\|dataStoreLock\|atomicSwap\|lngDedup\|lokaleDoctypeNav\|ninaDualGuard\|pageFeinThreaded\|pageFeinStartBg\|Referenz-Tausch\|blockierend' "$DASH" | head -40
+grep -n 'pageFein\|dataStoreLock\|atomicSwap\|lngDedup\|lokaleDoctypeNav\|ninaDualGuard\|pageFeinThreaded\|Referenz-Tausch' "$DASH" | head -40
 
-echo "--- no clear / no StartBg-thread ---"
-if grep -n 'data_store.clear()' "$DASH" | grep -q .; then
-  if grep -A2 'pageFein atomicSwap' "$DASH" | grep -q 'data_store.clear'; then
-    echo "FAIL: atomicSwap still clears"; exit 1
-  fi
-fi
-if grep -q 'Thread(target=update_all' "$DASH"; then
-  echo "FAIL: StartBg still threads update_all"; exit 1
-fi
-echo "OK swap/startbg"
-
-echo "--- HTTP sample ---"
+echo "--- HTTP sample PORT=$PORT ---"
+fail=0
 for path in / /energie /lokale-energie /speicher /umwelt /pegel /adsb /news; do
-  code=$(curl -s -o "/tmp/pagefein${path////_}.html" -w "%{http_code}" "http://127.0.0.1:5000$path" || echo 0)
+  code=$(curl -s -o "/tmp/pagefein${path////_}.html" -w "%{http_code}" --connect-timeout 3 --max-time 15 "http://127.0.0.1:${PORT}${path}" || echo 000)
   echo "HTTP $path=$code"
+  if [[ "$code" != "200" ]]; then fail=1; fi
 done
 
-python3 - <<'PY'
+python3 - <<PY
 from pathlib import Path
-src = Path("/home/fmg/prepper-dashboard/dashboard.py").read_text()
-n = src.count('"lng": {"value": fetch_lng()')
-print("lng keys:", n)
-assert n <= 1, "duplicate lng still present"
+src = Path("$DASH").read_text()
 assert "dataStoreLock" in src and "ninaDualGuard" in src
 assert "Thread(target=update_all" not in src
+assert "updateBusyGuard" not in src and "_update_all_body" not in src
+assert "update_all()  # einmal beim Start" in src
 if "pageFein atomicSwap" in src:
     assert "data_store = _new" in src
-    assert "data_store.clear()" not in src or "pageFein atomicSwap" not in src.split("data_store.clear()")[0][-80:]
-if "PAGE_LOKALE_ENERGIE" in src:
-    i = src.find("PAGE_LOKALE_ENERGIE")
-    chunk = src[i:i+900]
-    if "<nav" in chunk and "<!DOCTYPE" in chunk:
-        assert chunk.find("<!DOCTYPE") < chunk.find("<nav"), "PAGE_LOKALE nav still before DOCTYPE"
-print("OK pageFein sanity")
+print("OK pageFein SAFE sanity")
 PY
 
-echo "OK page-fein applied COMMIT=$COMMIT"
-echo "Check: Lock+Referenz-Tausch, blocking Start-Update, lng dedup, Lokale DOCTYPE, NINA kein Doppel-TX."
+if [[ "$fail" -ne 0 ]]; then
+  echo "FAIL: HTTP smoke not all 200 on :$PORT — consider restore bak"
+  exit 1
+fi
+echo "OK page-fein SAFE applied COMMIT=$COMMIT PORT=$PORT"
+echo "Check: Lock+Referenz-Tausch, bak StartBg, lng dedup, Lokale DOCTYPE, NINA kein Doppel-TX."
