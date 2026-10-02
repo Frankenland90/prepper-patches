@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 # pageFein Feinschliff (idempotent). Restores bak-pagefein if present, then apply/repair.
-COMMIT="${COMMIT:-REPLACE_ME}"
+COMMIT="${COMMIT:-05775f8277455468d6a85fc3419bdda9c9970d4c}"
 export COMMIT
 BASE="https://raw.githubusercontent.com/Frankenland90/prepper-patches/${COMMIT}"
 DASH_DIR="/home/fmg/prepper-dashboard"
