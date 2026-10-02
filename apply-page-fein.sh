@@ -2,7 +2,7 @@
 set -euo pipefail
 # pageFein SAFE (idempotent). Restores bak-pagefein, applies boot-safe fein only.
 # NO StartBg rewrite, NO BusyGuard, NO data_store.clear(). Curls discover PORT (Pi: 8080).
-COMMIT="${COMMIT:-REPLACE_ME}"
+COMMIT="${COMMIT:-7ca303284d4764aa79705cbbda2eb03078f93886}"
 export COMMIT
 BASE="https://raw.githubusercontent.com/Frankenland90/prepper-patches/${COMMIT}"
 DASH_DIR="/home/fmg/prepper-dashboard"
@@ -61,7 +61,6 @@ raw = zlib.decompress(base64.b64decode(p0 + p1))
 assert b"pageFein" in raw and b"dataStoreLock" in raw and b"ninaDualGuard" in raw
 assert b"Referenz-Tausch" in raw
 assert b"ABANDONED" in raw or b"Boot-safe" in raw or b"SAFE Feinschliff" in raw
-assert b"ABANDONED" in raw or b"SAFE Feinschliff" in raw or b"Boot-safe" in raw
 assert b"updateBusyGuard" in raw  # reject-string only; must not be applied to dash
 print("zb64 SAFE parts ok", len(raw))
 PY
