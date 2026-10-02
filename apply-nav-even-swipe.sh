@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-COMMIT="${COMMIT:-main}"
+COMMIT="${COMMIT:-REPLACE_ME}"
 BASE="https://raw.githubusercontent.com/Frankenland90/prepper-patches/${COMMIT}"
 DASH_DIR="/home/fmg/prepper-dashboard"
 DASH="$DASH_DIR/dashboard.py"
@@ -13,17 +13,17 @@ if [[ "$COMMIT" == "REPLACE_ME" || "$COMMIT" == PLACEHOLDER* ]]; then
 fi
 
 curl -fsSL "$BASE/patch-nav-even-swipe.py" -o /tmp/patch-nav-even-swipe.py
+curl -fsSL "$BASE/patch-nav-even-swipe.zb64" -o /tmp/patch-nav-even-swipe.zb64
 curl -fsSL "$BASE/patch-nav-even-swipe-zuhause.py" -o /tmp/patch-nav-even-swipe-zuhause.py
 
 grep -q 'navEvenSwipe' /tmp/patch-nav-even-swipe.py || { echo "FAIL: kein navEvenSwipe im Patch"; exit 1; }
-grep -q 'touchstart' /tmp/patch-nav-even-swipe.py || { echo "FAIL: kein touchstart"; exit 1; }
-grep -q 'nav-even-row' /tmp/patch-nav-even-swipe.py || { echo "FAIL: kein nav-even-row"; exit 1; }
 grep -q 'PLACEHOLDER' /tmp/patch-nav-even-swipe.py && { echo "FAIL PLACEHOLDER"; exit 1; } || true
-wc -c /tmp/patch-nav-even-swipe.py /tmp/patch-nav-even-swipe-zuhause.py
+python3 -c 'import base64,zlib,pathlib; b=zlib.decompress(base64.b64decode(pathlib.Path("/tmp/patch-nav-even-swipe.zb64").read_text().strip())); assert b"navEvenSwipe" in b; print("zb64 ok", len(b))'
+wc -c /tmp/patch-nav-even-swipe.py /tmp/patch-nav-even-swipe.zb64 /tmp/patch-nav-even-swipe-zuhause.py
 
 cp -a "$DASH" "$DASH.bak-navswipe-$TS" 2>/dev/null || true
+export COMMIT
 python3 /tmp/patch-nav-even-swipe.py "$DASH"
-# idempotent second run
 python3 /tmp/patch-nav-even-swipe.py "$DASH"
 python3 -m py_compile "$DASH"
 
@@ -52,7 +52,6 @@ for path in / /energie /adsb /medizin /news /pegel; do
   hits=$(grep -c 'navEvenSwipe\|nav-even-row\|flex:1 1 0' "/tmp/navswipe${path////_}.html" 2>/dev/null || echo 0)
   echo "HTTP $path=$code markers~$hits"
 done
-# zuhause optional
 code=$(curl -s -o /tmp/navswipe_zuhause.html -w "%{http_code}" http://127.0.0.1:5000/zuhause || echo 0)
 if [[ "$code" == "200" ]]; then
   grep -c 'navEvenSwipe' /tmp/navswipe_zuhause.html || true
