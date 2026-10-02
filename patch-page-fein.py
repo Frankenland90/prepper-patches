@@ -29,8 +29,10 @@ def load_payload():
 code = load_payload()
 if b"pageFein" not in code or b"dataStoreLock" not in code or b"ninaDualGuard" not in code:
     raise SystemExit("STOP: zb64 payload fehlt pageFein/dataStoreLock/ninaDualGuard")
-if b"Referenz-Tausch" not in code or b"blockierend bis Store" not in code:
-    raise SystemExit("STOP: zb64 payload fehlt 500-fix (Referenz-Tausch/blockierend)")
+if b"Referenz-Tausch" not in code:
+    raise SystemExit("STOP: zb64 payload fehlt Referenz-Tausch")
+if b"ABANDONED" not in code and b"SAFE Feinschliff" not in code and b"Boot-safe" not in code:
+    raise SystemExit("STOP: zb64 payload ist nicht SAFE-Variante")
 g = {"__name__": "__main__", "__file__": str(Path(__file__).resolve())}
 sys.argv = [sys.argv[0], str(TARGET)]
 exec(compile(code, "patch-page-fein.real.py", "exec"), g)
