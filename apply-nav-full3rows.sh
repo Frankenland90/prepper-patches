@@ -2,7 +2,7 @@
 set -euo pipefail
 # Nav: 3 Zeilen, volle Namen (# navFull3). Smoke PORT=8080 (never :5000).
 # Does NOT touch pageFein SAFE markers (Lock/NINA/lng).
-COMMIT="${COMMIT:-REPLACE_ME}"
+COMMIT="${COMMIT:-b83770f3be93b0f2453db7d7444c3c1ea60bb31d}"
 export COMMIT
 BASE="https://raw.githubusercontent.com/Frankenland90/prepper-patches/${COMMIT}"
 DASH_DIR="/home/fmg/prepper-dashboard"
