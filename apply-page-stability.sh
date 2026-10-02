@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 # Non-Mesh page stability harden (idempotent). # pageStability
-COMMIT="${COMMIT:-d22201f17fbfe694e3ca1be8a214bb81e57eec14}"
+COMMIT="${COMMIT:-55ca080067b7d8050729e33d58273858280e34cc}"
 export COMMIT
 BASE="https://raw.githubusercontent.com/Frankenland90/prepper-patches/${COMMIT}"
 DASH_DIR="/home/fmg/prepper-dashboard"
@@ -16,21 +16,24 @@ if [[ "$COMMIT" == "REPLACE_ME" || "$COMMIT" == PLACEHOLDER* ]]; then
 fi
 
 curl -fsSL "$BASE/patch-page-stability.py" -o /tmp/patch-page-stability.py
-curl -fsSL "$BASE/patch-page-stability.zb64" -o /tmp/patch-page-stability.zb64
+curl -fsSL "$BASE/patch-page-stability.zb64.p0" -o /tmp/patch-page-stability.zb64.p0
+curl -fsSL "$BASE/patch-page-stability.zb64.p1" -o /tmp/patch-page-stability.zb64.p1
 
 grep -q 'pageStability' /tmp/patch-page-stability.py || { echo "FAIL: kein pageStability im Stub"; exit 1; }
-python3 -c 'import base64,zlib,pathlib; b=zlib.decompress(base64.b64decode(pathlib.Path("/tmp/patch-page-stability.zb64").read_text().strip())); assert b"pageStability" in b and b"stratumTsGuard" in b; print("zb64 ok", len(b))'
+python3 - <<'PY'
+import base64, zlib, pathlib
+p0 = pathlib.Path("/tmp/patch-page-stability.zb64.p0").read_text().strip()
+p1 = pathlib.Path("/tmp/patch-page-stability.zb64.p1").read_text().strip()
+raw = zlib.decompress(base64.b64decode(p0 + p1))
+assert b"pageStability" in raw and b"stratumTsGuard" in raw
+print("zb64 parts ok", len(raw))
+PY
 grep -q 'PLACEHOLDER' /tmp/patch-page-stability.py && { echo "FAIL PLACEHOLDER"; exit 1; } || true
-# stub loads zb64 from same dir
-cp -a /tmp/patch-page-stability.zb64 /tmp/ 2>/dev/null || true
-# ensure zb64 sits next to stub when exec
-install -m 0644 /tmp/patch-page-stability.zb64 /tmp/patch-page-stability.zb64
-wc -c /tmp/patch-page-stability.py /tmp/patch-page-stability.zb64
+wc -c /tmp/patch-page-stability.py /tmp/patch-page-stability.zb64.p0 /tmp/patch-page-stability.zb64.p1
 
 cp -a "$DASH" "$DASH.bak-pagestab-$TS" 2>/dev/null || true
 [[ -f "$ZUH" ]] && cp -a "$ZUH" "$ZUH.bak-pagestab-$TS" 2>/dev/null || true
 
-# run from /tmp so stub finds sibling zb64
 python3 /tmp/patch-page-stability.py "$DASH" "$ZUH"
 python3 /tmp/patch-page-stability.py "$DASH" "$ZUH"
 python3 -m py_compile "$DASH"
