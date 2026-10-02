@@ -6,10 +6,13 @@ if [[ "$COMMIT" == "REPLACE_ME" || "$COMMIT" == PLACEHOLDER* ]]; then
   echo "FAIL: COMMIT not pinned"; exit 1
 fi
 echo "=== mesh-stability loader COMMIT=$COMMIT ==="
-curl -fsSL "$BASE/apply-mesh-stability.zb64" -o /tmp/apply-mesh-stability.zb64
+curl -fsSL "$BASE/apply-mesh-stability.zb64.p0" -o /tmp/apply-mesh-stability.zb64.p0
+curl -fsSL "$BASE/apply-mesh-stability.zb64.p1" -o /tmp/apply-mesh-stability.zb64.p1
 python3 - <<'PY'
 import base64, zlib, pathlib
-raw = zlib.decompress(base64.b64decode(pathlib.Path("/tmp/apply-mesh-stability.zb64").read_text().strip()))
+p0 = pathlib.Path("/tmp/apply-mesh-stability.zb64.p0").read_text().strip()
+p1 = pathlib.Path("/tmp/apply-mesh-stability.zb64.p1").read_text().strip()
+raw = zlib.decompress(base64.b64decode(p0 + p1))
 path = pathlib.Path("/tmp/apply-mesh-stability.real.sh")
 path.write_bytes(raw)
 path.chmod(0o755)
