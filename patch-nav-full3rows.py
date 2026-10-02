@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""navFull3 stub — loads sibling .zb64 (zlib+b64)."""
+"""navFull3 stub — loads sibling .zb64 (zlib+b64). Nav-ONLY; no pageFein/data_store."""
 from pathlib import Path
 import base64, sys, zlib, urllib.request, os
 
@@ -20,6 +20,8 @@ def load_payload():
 code = load_payload()
 if b"navFull3" not in code or b"nav-full3-row" not in code:
     raise SystemExit("STOP: zb64 payload fehlt navFull3")
+if b"navFull3v2" not in code:
+    raise SystemExit("STOP: zb64 payload fehlt navFull3v2 (zu alt)")
 g = {"__name__": "__main__", "__file__": str(Path(__file__).resolve())}
 sys.argv = [sys.argv[0], str(TARGET)]
 exec(compile(code, "patch-nav-full3rows.real.py", "exec"), g)

@@ -18,8 +18,8 @@ def load_payload():
         return zlib.decompress(base64.b64decode(r.read().decode().strip()))
 
 code = load_payload()
-if b"navFull3" not in code:
-    raise SystemExit("STOP: zb64 fehlt navFull3")
+if b"navFull3" not in code or b"navFull3v2" not in code:
+    raise SystemExit("STOP: zb64 fehlt navFull3v2")
 g = {"__name__": "__main__", "__file__": str(Path(__file__).resolve())}
 sys.argv = [sys.argv[0], str(TARGET)]
 exec(compile(code, "patch-nav-full3rows.real.py", "exec"), g)
