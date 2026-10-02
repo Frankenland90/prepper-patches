@@ -1,6 +1,7 @@
 #!/bin/bash
 set -euo pipefail
-COMMIT="${COMMIT:-b7bad0463da29cbc7c17adeb9256a6b88aa250c2}"
+COMMIT="${COMMIT:-2854b3118b17263485cfd097c71021f5091a9303}"
+export COMMIT
 BASE="https://raw.githubusercontent.com/Frankenland90/prepper-patches/${COMMIT}"
 if [[ "$COMMIT" == "REPLACE_ME" || "$COMMIT" == PLACEHOLDER* ]]; then
   echo "FAIL: COMMIT not pinned"; exit 1
