@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 # pageFein SAFE apply loader — fetches zlib+b64 body (PORT systemd/8080, never :5000).
-COMMIT="${COMMIT:-REPLACE_ME}"
+COMMIT="${COMMIT:-680b69d4ba08fe2cc101f57c883afd537f6103a2}"
 export COMMIT
 BASE="https://raw.githubusercontent.com/Frankenland90/prepper-patches/${COMMIT}"
 echo "=== page-fein SAFE loader COMMIT=$COMMIT ==="
