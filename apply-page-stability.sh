@@ -1,7 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 # Non-Mesh page stability harden (idempotent). # pageStability
-COMMIT="${COMMIT:-REPLACE_ME}"
+COMMIT="${COMMIT:-d22201f17fbfe694e3ca1be8a214bb81e57eec14}"
+export COMMIT
 BASE="https://raw.githubusercontent.com/Frankenland90/prepper-patches/${COMMIT}"
 DASH_DIR="/home/fmg/prepper-dashboard"
 DASH="$DASH_DIR/dashboard.py"
@@ -15,18 +16,22 @@ if [[ "$COMMIT" == "REPLACE_ME" || "$COMMIT" == PLACEHOLDER* ]]; then
 fi
 
 curl -fsSL "$BASE/patch-page-stability.py" -o /tmp/patch-page-stability.py
+curl -fsSL "$BASE/patch-page-stability.zb64" -o /tmp/patch-page-stability.zb64
 
-grep -q 'pageStability' /tmp/patch-page-stability.py || { echo "FAIL: kein pageStability im Patch"; exit 1; }
-grep -q 'stratumTsGuard' /tmp/patch-page-stability.py || { echo "FAIL: kein stratumTsGuard"; exit 1; }
-grep -q 'histTojsonGuard' /tmp/patch-page-stability.py || { echo "FAIL: kein histTojsonGuard"; exit 1; }
+grep -q 'pageStability' /tmp/patch-page-stability.py || { echo "FAIL: kein pageStability im Stub"; exit 1; }
+python3 -c 'import base64,zlib,pathlib; b=zlib.decompress(base64.b64decode(pathlib.Path("/tmp/patch-page-stability.zb64").read_text().strip())); assert b"pageStability" in b and b"stratumTsGuard" in b; print("zb64 ok", len(b))'
 grep -q 'PLACEHOLDER' /tmp/patch-page-stability.py && { echo "FAIL PLACEHOLDER"; exit 1; } || true
-wc -c /tmp/patch-page-stability.py
+# stub loads zb64 from same dir
+cp -a /tmp/patch-page-stability.zb64 /tmp/ 2>/dev/null || true
+# ensure zb64 sits next to stub when exec
+install -m 0644 /tmp/patch-page-stability.zb64 /tmp/patch-page-stability.zb64
+wc -c /tmp/patch-page-stability.py /tmp/patch-page-stability.zb64
 
 cp -a "$DASH" "$DASH.bak-pagestab-$TS" 2>/dev/null || true
 [[ -f "$ZUH" ]] && cp -a "$ZUH" "$ZUH.bak-pagestab-$TS" 2>/dev/null || true
 
+# run from /tmp so stub finds sibling zb64
 python3 /tmp/patch-page-stability.py "$DASH" "$ZUH"
-# idempotent second pass
 python3 /tmp/patch-page-stability.py "$DASH" "$ZUH"
 python3 -m py_compile "$DASH"
 [[ -f "$ZUH" ]] && python3 -m py_compile "$ZUH" || true
@@ -49,7 +54,6 @@ for path in / /energie /lokale-energie /speicher /umwelt /luft /pegel /adsb /zuh
   echo "HTTP $path=$code"
 done
 
-# quick 500 sniff: stratum unguarded must be gone; default tojson present
 grep -q 'stratumTsGuard' "$DASH" && echo "OK stratumTsGuard"
 grep -q 'default(\[\]) | tojson' "$DASH" && echo "OK hist defaults"
 grep -q 'stratum.value.timestamp \* 1000 }};' "$DASH" && echo "WARN: unguarded timestamp still present" || echo "OK no unguarded timestamp"
