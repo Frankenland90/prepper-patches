@@ -10,7 +10,7 @@ TS=$(date +%Y%m%d-%H%M%S)
 PORT="${PORT:-8080}"
 
 if [[ "$PORT" == "5000" ]]; then
-  echo "FAIL: refused PORT=5000 \u2014 smoke only :8080"
+  echo "FAIL: refused PORT=5000 - smoke only :8080"
   exit 1
 fi
 
@@ -56,12 +56,9 @@ fi
 if [[ "$had_nina" == 1 ]]; then
   grep -q 'ninaDualGuard' "$DASH" || { rollback "ninaDualGuard weg"; exit 1; }
 fi
-if grep -q 'Thread(target=update_all' "$DASH"; then
-  echo "WARN: Thread(target=update_all ist noch in dashboard.py (nicht von diesem Patch neu, aber Boot riskant)"
-fi
 
 echo "--- Marker ---"
-grep -n 'strom14dChart\|stromHiLo\|DE-LU' "$DASH" | head -20
+grep -n -E 'strom14dChart|stromHiLo|DE-LU' "$DASH" | head -20 || true
 if grep -q 'Strompreis Day-Ahead' "$DASH"; then
   rollback "Day-Ahead noch im File"
   exit 1
@@ -100,7 +97,7 @@ if [[ "$code" == "200" ]]; then
   grep -q 'DE-LU' /tmp/strom14d_energie.html || { rollback "kein DE-LU Untertitel"; exit 1; }
   echo "OK HTML: keine Day-Ahead-Kachel, stromHiLo + 14-Tage-Chart"
 else
-  echo "WARN: /energie nicht 200 (code=$code) \u2014 Patch ist drauf, Dienst pruefen"
+  echo "WARN: /energie nicht 200 (code=$code) - Patch ist drauf, Dienst pruefen"
 fi
 
 echo "OK strom-14d applied COMMIT=$COMMIT"
