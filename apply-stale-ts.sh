@@ -9,6 +9,7 @@ DASH_DIR="/home/fmg/prepper-dashboard"
 DASH="$DASH_DIR/dashboard.py"
 TS=$(date +%Y%m%d-%H%M%S)
 PORT="${PORT:-8080}"
+EXPECT_SHA="d2d57a3635a3ca9d1fe58a3e1a0ed16bb0e6089ad79e8e4fb32d0dab3e01f4e9"
 
 if [[ "$PORT" == "5000" ]]; then
   echo "FAIL: refused PORT=5000 - smoke only :8080"
@@ -16,13 +17,19 @@ if [[ "$PORT" == "5000" ]]; then
 fi
 
 echo "=== stale-ts apply COMMIT=$COMMIT PORT=$PORT ==="
-curl -fsSL "$BASE/patch-stale-ts.py" -o /tmp/patch-stale-ts.py
+mkdir -p /tmp/stale-b64
+: > /tmp/stale-b64/all
+for i in 0 1 2 3; do
+  curl -fsSL "$BASE/patch-stale-ts.py.b64.$i" -o "/tmp/stale-b64/c$i"
+  cat "/tmp/stale-b64/c$i" >> /tmp/stale-b64/all
+done
+base64 -d /tmp/stale-b64/all | gzip -dc > /tmp/patch-stale-ts.py
+echo "$EXPECT_SHA  /tmp/patch-stale-ts.py" | sha256sum -c -
 grep -q 'staleTsBoot' /tmp/patch-stale-ts.py || { echo "FAIL: patch ohne staleTsBoot"; exit 1; }
 if grep -q 'Thread(target=update_all' /tmp/patch-stale-ts.py; then
   echo "FAIL: patch enthaelt Thread(target=update_all"
   exit 1
 fi
-# Echte Store-Ersetzung. data_store[\"key\"] = und Kommentare zaehlen nicht.
 if grep -nE '^[[:space:]]*data_store[[:space:]]*=' /tmp/patch-stale-ts.py; then
   echo "FAIL: patch schreibt data_store"
   exit 1
