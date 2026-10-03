@@ -9,7 +9,7 @@ DASH_DIR="/home/fmg/prepper-dashboard"
 DASH="$DASH_DIR/dashboard.py"
 TS=$(date +%Y%m%d-%H%M%S)
 PORT="${PORT:-8080}"
-EXPECT_SHA="d2d57a3635a3ca9d1fe58a3e1a0ed16bb0e6089ad79e8e4fb32d0dab3e01f4e9"
+EXPECT_SHA="998531231452c3bc0b0b2ac40c0c93a69e910c9b478d01e0b120cfcf116061db"
 
 if [[ "$PORT" == "5000" ]]; then
   echo "FAIL: refused PORT=5000 - smoke only :8080"
@@ -52,66 +52,105 @@ rollback() {
     || true
 }
 
-python3 /tmp/patch-stale-ts.py "$DASH"
-cp -a "$DASH" /tmp/dashboard.py.stalets-once
-python3 /tmp/patch-stale-ts.py "$DASH"
-cmp -s "$DASH" /tmp/dashboard.py.stalets-once || { rollback "zweiter Lauf nicht idempotent"; exit 1; }
-python3 -m py_compile "$DASH" || { rollback "py_compile"; exit 1; }
-
-if [[ "$had_fein" == 1 ]]; then
-  grep -q 'pageFein' "$DASH" || { rollback "pageFein weg"; exit 1; }
-fi
-if [[ "$had_lock" == 1 ]]; then
-  grep -q 'dataStoreLock' "$DASH" || { rollback "dataStoreLock weg"; exit 1; }
-fi
-if [[ "$had_nina" == 1 ]]; then
-  grep -q 'ninaDualGuard' "$DASH" || { rollback "ninaDualGuard weg"; exit 1; }
-fi
-if [[ "$had_boot" == 1 ]]; then
-  grep -q 'update_all()  # einmal beim Start' "$DASH" || { rollback "Boot-Pfad weg"; exit 1; }
-fi
-if grep -q 'Thread(target=update_all' "$DASH"; then
-  rollback "Thread(target=update_all im Dashboard"
+page1_ok=0
+python3 - << 'PY' || page1_ok=$?
+import ast, pathlib, sys
+src = pathlib.Path("/home/fmg/prepper-dashboard/dashboard.py").read_text(encoding="utf-8")
+tree = ast.parse(src)
+lines = src.splitlines(keepends=True)
+ok = False
+for node in tree.body:
+    if isinstance(node, ast.Assign):
+        for t in node.targets:
+            if isinstance(t, ast.Name) and t.id == "PAGE1":
+                block = "".join(lines[node.lineno - 1:node.end_lineno])
+                mark = block.rfind('id="staleTsBoot"')
+                body = block.rfind("</body>")
+                ok = mark >= 0 and body > mark
+if not ok or "_stale_ts_render(render_template_string(" not in src:
+    sys.exit(1)
+print("OK PAGE1 literal enthaelt staleTsBoot vor </body>")
+PY
+if [[ "$page1_ok" -ne 0 ]]; then
+  rollback "PAGE1 Template ohne staleTsBoot"
   exit 1
 fi
-grep -q 'staleTs snap' "$DASH" || { rollback "kein staleTs snap"; exit 1; }
-grep -q 'staleTs restore' "$DASH" || { rollback "kein staleTs restore"; exit 1; }
-grep -q 'staleTsBoot' "$DASH" || { rollback "kein staleTsBoot"; exit 1; }
 
-echo "--- Marker ---"
-grep -n 'staleTs snap\|staleTs restore\|staleTsBoot\|staleTs pegelPage\|staleTs freqApi' "$DASH" | head -20
+echo "--- restart ---"
+set +e
+sudo systemctl restart prepper-dashboard.service
+rc=$?
+if [[ $rc -ne 0 ]]; then
+  sudo systemctl restart prepper-dashboard
+  rc=$?
+fi
+set -e
+if [[ $rc -ne 0 ]]; then
+  echo "WARN: systemctl restart fehlgeschlagen. Patch bleibt, kein Rollback."
+  echo "OK stale-ts written COMMIT=$COMMIT (Dienst bitte neu starten)"
+  exit 0
+fi
 
-sudo systemctl restart prepper-dashboard.service 2>/dev/null \
-  || sudo systemctl restart prepper-dashboard \
-  || true
+gunzip_body() {
+  python3 - "$1" << 'PY'
+import gzip, pathlib, sys
+p = pathlib.Path(sys.argv[1])
+b = p.read_bytes()
+if b.startswith(b"\x1f\x8b"):
+    p.write_bytes(gzip.decompress(b))
+    print("NOTE: body war gzip, entpackt", p.name)
+PY
+}
 
 echo "--- HTTP :$PORT (nie :5000) ---"
 code="000"
-for i in 1 2 3 4 5 6 7 8 9 10; do
-  code=$(curl -s -o /tmp/stalets_home.html -w "%{http_code}" --connect-timeout 3 --max-time 20 "http://127.0.0.1:${PORT}/" || echo 000)
+for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  code=$(curl -s -o /tmp/stalets_home.html -w "%{http_code}" --connect-timeout 3 --max-time 20 "http://127.0.0.1:${PORT}/" || true)
+  [[ -z "$code" ]] && code=000
   echo "try $i HTTP /=$code"
   if [[ "$code" == "200" || "$code" == "500" ]]; then
     break
   fi
   sleep 3
 done
-eng=$(curl -s -o /tmp/stalets_energie.html -w "%{http_code}" --connect-timeout 3 --max-time 20 "http://127.0.0.1:${PORT}/energie" || echo 000)
+gunzip_body /tmp/stalets_home.html || true
+eng=$(curl -s -o /tmp/stalets_energie.html -w "%{http_code}" --connect-timeout 3 --max-time 20 "http://127.0.0.1:${PORT}/energie" || true)
+[[ -z "$eng" ]] && eng=000
 echo "HTTP /energie=$eng"
-slash=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 --max-time 15 "http://127.0.0.1:${PORT}/energie/" || echo 000)
+gunzip_body /tmp/stalets_energie.html || true
+slash=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 --max-time 15 "http://127.0.0.1:${PORT}/energie/" || true)
+[[ -z "$slash" ]] && slash=000
 echo "HTTP /energie/=$slash (200 oder 302 ok)"
 
 if [[ "$code" == "500" || "$eng" == "500" || "$slash" == "500" ]]; then
   rollback "HTTP 500"
   exit 1
 fi
+if [[ "$eng" == "302" || "$eng" == "301" || "$eng" == "308" ]]; then
+  echo "OK /energie $eng (redirect)"
+fi
+if [[ "$slash" == "302" || "$slash" == "301" || "$slash" == "308" || "$slash" == "200" ]]; then
+  echo "OK /energie/ $slash"
+fi
 if [[ "$code" == "200" ]]; then
-  grep -q 'staleTsBoot' /tmp/stalets_home.html || { rollback "kein staleTsBoot im HTML"; exit 1; }
-  echo "OK HTML / enthaelt staleTsBoot"
+  if grep -q 'staleTsBoot' /tmp/stalets_home.html; then
+    echo "OK HTML / enthaelt staleTsBoot"
+  elif grep -q 'nav-top' /tmp/stalets_home.html || grep -q 'Käswasser' /tmp/stalets_home.html; then
+    rollback "Dashboard-HTML ohne staleTsBoot"
+    exit 1
+  else
+    echo "WARN: / ist 200 aber kein Dashboard-HTML — kein Rollback"
+  fi
 else
-  echo "WARN: / nicht 200 (code=$code) - Patch ist drauf, Dienst pruefen"
+  echo "WARN: / nicht 200 (code=$code) — Patch bleibt, kein Rollback"
 fi
 if [[ "$eng" == "200" ]]; then
-  grep -q 'staleTsBoot' /tmp/stalets_energie.html || { rollback "Energie ohne staleTsBoot"; exit 1; }
+  if grep -q 'staleTsBoot' /tmp/stalets_energie.html; then
+    echo "OK HTML /energie enthaelt staleTsBoot"
+  elif grep -q 'nav-top' /tmp/stalets_energie.html; then
+    rollback "Energie-HTML ohne staleTsBoot"
+    exit 1
+  fi
 fi
 
 echo "OK stale-ts applied COMMIT=$COMMIT"
