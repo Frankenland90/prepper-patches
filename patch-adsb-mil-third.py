@@ -375,8 +375,8 @@ def main():
     label = shape_label(parts)
     if not changed:
         confirm(src)
-        print("adsbMilThird schon drin \u2014 nichts geaendert. (%s)" % label)
-        print("OK adsbMilThird: Kachel 3 MILIT\u00c4R direkt \u00fcber SQUAWK / NOTLAGE")
+        print("adsbMilThird schon drin — nichts geaendert. (%s)" % label)
+        print("OK adsbMilThird: Kachel 3 MILITÄR direkt über SQUAWK / NOTLAGE")
         return
     again, changed2, _ = reorder(new_html)
     if changed2 or again != new_html:
@@ -387,7 +387,7 @@ def main():
     ast.parse(src2)
     titles2 = confirm(src2)
     path.write_text(src2, encoding="utf-8")
-    print("OK adsbMilThird: Kachel 3 MILIT\u00c4R direkt \u00fcber SQUAWK / NOTLAGE (%s)" % label)
+    print("OK adsbMilThird: Kachel 3 MILITÄR direkt über SQUAWK / NOTLAGE (%s)" % label)
     print("TITLES:", " | ".join(titles2))
 
 
