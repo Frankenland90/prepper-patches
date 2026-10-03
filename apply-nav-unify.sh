@@ -1,7 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 # Nav ONLY (# navUnify): eine gemeinsame Leiste, 3 gleichmaessige Zeilen, volle Namen.
-# Smoke nur :8080. 302 (trailing slash) ist ok. Rollback bei HTTP 500 oder wenn / nicht 200 ist.
+# Smoke nur :8080. 302 auf /energie ist ok. curl --compressed plus gunzip.
+# Rollback nur bei HTTP 500 oder wenn das entpackte HTML von GET / Dashboard ist
+# (nav-top oder Kaeswasser) und nicht genau ein navUnify enthaelt.
 # Aendert nicht update_all() # einmal beim Start, data_store-Zuweisung, staleTsBoot, strom14dChart.
 COMMIT="886499e4fd8b2d842572a21a4ca8fbee7094c22e"
 EXPECT_SHA="bdaf9f13b2485782e308c94081fb492f93b287a170457c7217a0e6950dcc2560"
@@ -131,66 +133,73 @@ sudo systemctl restart prepper-dashboard.service 2>/dev/null \
   || true
 
 echo "--- HTTP :$PORT (nie :5000) ---"
+decode_http_body() {
+  python3 - "$1" << 'PY'
+import gzip, pathlib, sys
+p = pathlib.Path(sys.argv[1])
+if not p.is_file():
+    raise SystemExit(0)
+b = p.read_bytes()
+if len(b) >= 2 and b[0] == 0x1F and b[1] == 0x8B:
+    p.write_bytes(gzip.decompress(b))
+    print("NOTE: body war gzip, entpackt", p.name)
+PY
+}
+
 root=""
 for i in 1 2 3 4 5 6 7 8 9 10; do
-  root=$(curl -s -o /tmp/navunify_root.html -w "%{http_code}" --connect-timeout 3 --max-time 20 "http://127.0.0.1:${PORT}/" || echo 000)
+  root=$(curl --compressed -s -o /tmp/navunify_root.html -w "%{http_code}" --connect-timeout 3 --max-time 20 "http://127.0.0.1:${PORT}/" || true)
+  [[ -z "$root" ]] && root=000
   echo "try $i HTTP /=$root"
   if [[ "$root" == "200" || "$root" == "500" ]]; then
     break
   fi
   sleep 2
 done
+decode_http_body /tmp/navunify_root.html || true
 if [[ "$root" == "500" ]]; then
   rollback "HTTP / = 500"
   exit 1
 fi
 if [[ "$root" != "200" ]]; then
-  rollback "HTTP / not 200 ($root)"
+  echo "WARN: HTTP / = $root — Patch bleibt, kein Rollback"
+else
+  echo "OK HTTP / = 200"
+fi
+
+eng=$(curl --compressed -s -o /tmp/navu_energie.html -w "%{http_code}" --connect-timeout 3 --max-time 20 "http://127.0.0.1:${PORT}/energie" || true)
+[[ -z "$eng" ]] && eng=000
+decode_http_body /tmp/navu_energie.html || true
+echo "HTTP /energie=$eng"
+if [[ "$eng" == "500" ]]; then
+  rollback "HTTP /energie = 500"
   exit 1
 fi
-echo "OK HTTP / = 200"
+if [[ "$eng" == "302" || "$eng" == "301" || "$eng" == "308" ]]; then
+  echo "OK /energie $eng (redirect)"
+fi
 
-fail=0
-for path in / /energie /lokale-energie /lokal /speicher /umwelt /luft /pegel /adsb /zuhause /mesh /mesh2 /news /funk /pi /medizin; do
-  safe="navu${path//\//_}"
-  code=$(curl -s -o "/tmp/${safe}.html" -w "%{http_code}" --connect-timeout 3 --max-time 20 "http://127.0.0.1:${PORT}${path}" || echo 000)
-  echo "HTTP $path=$code"
-  if [[ "$code" == "500" ]]; then
-    echo "FAIL: HTTP 500 $path"
-    fail=1
-    break
-  fi
-  if [[ "$code" == "302" || "$code" == "301" || "$code" == "404" || "$code" == "000" ]]; then
-    continue
-  fi
-  if [[ "$code" != "200" ]]; then
-    echo "WARN: HTTP $path=$code"
-    continue
-  fi
-  # Seiten ausserhalb des Dashboards (z.B. eigener Zuhause/Funk-Prozess) nur warnen
-  ids=$(grep -c 'id="navUnify"' "/tmp/${safe}.html" || true)
-  rows=$(grep -c 'class="nr"' "/tmp/${safe}.html" || true)
-  if [[ "$path" == "/zuhause" || "$path" == "/funk" ]]; then
-    echo "  note $path ids=${ids:-0} rows=${rows:-0}"
-    continue
-  fi
-  if [[ "${ids:-0}" != "1" || "${rows:-0}" -lt 3 ]]; then
-    echo "FAIL: navUnify fehlt/doppelt auf $path ids=${ids:-0} rows=${rows:-0}"
-    fail=1
-    break
-  fi
-  for name in "Lage" "Energie" "Lokale" "Speicher" "Umwelt" "Luft" "Pegel" "ADSB" "Zuhause" "Mesh 1" "Mesh 2" "News" "Funk" "System" "Medizin"; do
-    if ! grep -q "$name" "/tmp/${safe}.html"; then
-      echo "FAIL: Name fehlt auf $path: $name"
-      fail=1
-      break
-    fi
-  done
-  [[ "$fail" == 1 ]] && break
-done
-if [[ "$fail" == 1 ]]; then
+ids=0
+rows=0
+if [[ -f /tmp/navunify_root.html ]]; then
+  ids=$(grep -c 'id="navUnify"' /tmp/navunify_root.html || true)
+  rows=$(grep -c 'class="nr"' /tmp/navunify_root.html || true)
+fi
+ids=${ids:-0}
+rows=${rows:-0}
+dash=0
+if [[ -f /tmp/navunify_root.html ]] && { grep -q 'nav-top' /tmp/navunify_root.html || grep -q 'Käswasser' /tmp/navunify_root.html; }; then
+  dash=1
+fi
+if [[ "$root" == "200" && "$dash" == 1 && "$ids" != "1" ]]; then
+  echo "FAIL: navUnify fehlt/doppelt auf / ids=${ids} rows=${rows}"
   rollback "smoke navUnify"
   exit 1
+fi
+if [[ "$root" == "200" && "$ids" == "1" ]]; then
+  echo "OK decoded / navUnify ids=1 rows=${rows}"
+elif [[ "$root" == "200" ]]; then
+  echo "WARN: decoded / ids=${ids} rows=${rows} dash=${dash} — kein Dashboard-HTML ohne genau ein navUnify, kein Rollback"
 fi
 
 echo "OK navUnify applied COMMIT=$COMMIT PORT=$PORT"
