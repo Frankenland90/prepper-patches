@@ -2,7 +2,7 @@
 set -euo pipefail
 # Energie: Day-Ahead-Kachel weg, Strompreis aktuell = 14-Tage-Chart wie Diesel.
 # Smoke nur :8080. 302 auf trailing slash ist ok. Nicht :5000.
-COMMIT="${COMMIT:-c7493440aec7a8da5a2c7fe99d7b44f7a9b326d9}"
+COMMIT="${COMMIT:-fdb301e602b044c58ba23c6c960c9ba3a9e046d9}"
 BASE="https://raw.githubusercontent.com/Frankenland90/prepper-patches/${COMMIT}"
 DASH_DIR="/home/fmg/prepper-dashboard"
 DASH="$DASH_DIR/dashboard.py"
@@ -21,7 +21,8 @@ if grep -q 'Thread(target=update_all' /tmp/patch-strom-14d.py; then
   echo "FAIL: patch enthaelt StartBg update_all"
   exit 1
 fi
-if grep -q 'data_store =' /tmp/patch-strom-14d.py; then
+# Nur eine Zeile, die data_store per Zuweisung ersetzt. Kommentar oder "data_store =" im String ist kein Schreibzugriff.
+if grep -nE '^[[:space:]]*data_store[[:space:]]*=' /tmp/patch-strom-14d.py; then
   echo "FAIL: patch schreibt data_store"
   exit 1
 fi
