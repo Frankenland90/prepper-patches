@@ -43,8 +43,37 @@ if grep -nE '^[[:space:]]*data_store[[:space:]]*=' /tmp/patch-lng-color-flip.py;
   echo "FAIL: patch schreibt data_store"
   exit 1
 fi
-if grep -q 'data_store.clear()' /tmp/patch-lng-color-flip.py; then
+# Nur ein echter Aufruf zaehlt (AST). Docstring, Kommentar oder Self-Check-String
+# wie data_store.clear() im Patch-Kopf ist kein clear() und kein Schreibzugriff.
+clear_rc=0
+set +e
+python3 - /tmp/patch-lng-color-flip.py << 'CLEARPY'
+import ast, pathlib, sys
+path = sys.argv[1]
+tree = ast.parse(pathlib.Path(path).read_text(encoding="utf-8"), filename=path)
+hit = False
+for node in ast.walk(tree):
+    if not isinstance(node, ast.Call):
+        continue
+    func = node.func
+    if (
+        isinstance(func, ast.Attribute)
+        and func.attr == "clear"
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "data_store"
+    ):
+        print("%s:%s: data_store.clear()" % (path, node.lineno))
+        hit = True
+raise SystemExit(3 if hit else 0)
+CLEARPY
+clear_rc=$?
+set -e
+if [[ "$clear_rc" -eq 3 ]]; then
   echo "FAIL: patch ruft data_store.clear auf"
+  exit 1
+fi
+if [[ "$clear_rc" -ne 0 ]]; then
+  echo "FAIL: clear-guard konnte Patch nicht parsen"
   exit 1
 fi
 python3 -m py_compile /tmp/patch-lng-color-flip.py
