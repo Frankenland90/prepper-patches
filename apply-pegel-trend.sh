@@ -19,7 +19,7 @@ B="http://127.0.0.1:${PORT}"
 CURL=(curl --compressed -s --connect-timeout 3 --max-time 40)
 [[ -x "$VPY" ]] || VPY=python3
 echo "=== pegelTrend apply, Dashboard-Port $PORT (config.py: ${CFG_PORT:-fehlt}) ==="
-EXPECT_PATCH="3861a089bd31ed4c0b51911096078d01200a6d610ef4b3b83d2e683ca1627341"
+EXPECT_PATCH="3219aa605f42b553691b43f1b3a961d8310b9810a9b47e2af6aafad3c847cb15"
 rm -rf "$W" && mkdir -p "$W"
 cat > "$W/patch-pegel-trend.py" << 'PATCHPY_EOF'
 #!/usr/bin/env python3
@@ -288,11 +288,13 @@ def main():
         got = tokh(ast.get_source_segment(src, defs[k][0]))
         if got != want:
             raise SystemExit("STOP: %s weicht vom geprueften Stand ab (%s statt %s) - nichts geaendert" % (k, got, want))
-    if len(page) != 1 or not isinstance(page[0].value, ast.Constant) or not isinstance(page[0].value.value, str):
-        raise SystemExit("STOP: PAGE_PEGEL nicht eindeutig als Text - nichts geaendert")
-    pv = page[0].value.value
-    if pv.count(ANCHOR) != 1 or "pg-trend" in pv:
-        raise SystemExit("STOP: Pegel-Anker %d mal in PAGE_PEGEL - nichts geaendert" % pv.count(ANCHOR))
+    # PAGE_PEGEL darf zusammengesetzt sein (z. B. + NAV); ersetzt wird zur Laufzeit am fertigen Wert
+    # (genau 1 Anker, sonst Seite unveraendert) und nach dem Neustart an /pegel geprueft.
+    if not page:
+        raise SystemExit("STOP: PAGE_PEGEL nicht gefunden - nichts geaendert")
+    na = src.count(ANCHOR)
+    if na < 1 or "pg-trend" in src:
+        raise SystemExit("STOP: Pegel-Anker %d mal in dashboard.py - nichts geaendert" % na)
     ms = list(MAIN_RE.finditer(src))
     if len(ms) != 1:
         raise SystemExit("STOP: __main__ %d mal" % len(ms))
@@ -301,7 +303,7 @@ def main():
     ast.parse(new)
     compile(new, str(f), "exec")
     f.write_text(new, encoding="utf-8")
-    print("RESULT dashboard.py=neu (sha16 vorher %s, Funktionen geprueft, Anker 1x)" % h)
+    print("RESULT dashboard.py=neu (sha16 vorher %s, Funktionen geprueft, Anker %dx in Datei, PAGE_PEGEL %dx zugewiesen)" % (h, na, len(page)))
 
 
 if __name__ == "__main__":
