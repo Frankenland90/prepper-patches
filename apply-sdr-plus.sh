@@ -3,7 +3,7 @@ set -euo pipefail
 # sdrPlus: SDR-Planer prepper-sdr v2 - alle 30 min kurzer Rundfunk-Block (UKW-RDS via redsea, DAB+ via welle-cli: Warn-/Durchsagetexte),
 # Meteor-M LRPT 137,9 MHz bei Ueberfluegen >= 20 Grad (satdump, Bahndaten celestrak mit Offline-Cache), Seite /meteor,
 # Funk-Kachel-Zeilen Rundfunk + Meteor. Nur Empfang - sendet nichts (kein Funk, kein Mesh).
-# Nur bei dashboard.py sha16 18daef1da37a85b5 (vor sdAck) oder 18daef1da37a85b5 + sdAck-Block. Neustart nur prepper-sdr + prepper-dashboard.
+# Nur bei dashboard.py sha16 18daef1da37a85b5 (vor sdAck), a54abd412adc0503 (nach sdAck) oder 18daef1da37a85b5 + sdAck-Block. Neustart nur prepper-sdr + prepper-dashboard.
 COMMIT_ARG="${1:-unbekannt}"
 DASH_DIR="/home/fmg/prepper-dashboard"
 F="$DASH_DIR/dashboard.py"
@@ -14,6 +14,9 @@ UNIT="prepper-sdr.service"
 REDSEA_URL="https://github.com/windytan/redsea/archive/refs/tags/v1.3.1.tar.gz"
 REDSEA_SHA="2d1137dba23c1ae2d8af87bda45ab90ee962e55d3b93dc9295d1a53e15a8cfae"
 REDSEA_BIN="${SDR_REDSEA_BIN:-/usr/local/bin/redsea}"
+SGP4_URL="https://files.pythonhosted.org/packages/14/a8/4d6b7e2d964582be06ab6ebcbd00ae9b54cd0d9ca9c0dbb393e49ea568e6/sgp4-2.22.tar.gz"
+SGP4_SHA="17f0a2eaad2dca065b6de25c1ceaa940ff7cfa8cc67120cb4111a00f177b86f9"
+NEW_LIB=0
 CFG_PORT=$(sed -n 's/^PORT[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$DASH_DIR/config.py" 2>/dev/null | head -1 || true)
 PORT="${DASH_PORT:-${CFG_PORT:-5000}}"
 if ! [[ "$PORT" =~ ^[0-9]+$ ]]; then echo "STOP: Dashboard-Port unklar ($PORT) - nichts geaendert"; exit 1; fi
@@ -22,8 +25,8 @@ B="http://127.0.0.1:${PORT}"
 CURL=(curl --compressed -s --connect-timeout 3 --max-time 40)
 [[ -x "$VPY" ]] || VPY=python3
 echo "=== sdrPlus apply, Dashboard-Port $PORT (config.py: ${CFG_PORT:-fehlt}) ==="
-EXPECT_PATCH="e49ec8e2b2d2fd886dec88ef435ec222655945505c91de65a3a9a0d5838923f3"
-EXPECT_MOD="4e5ce7d8c0f402cfd701772efcdc47cf68888f32b5c72ebd90dfaaf253e30fd3"
+EXPECT_PATCH="e966209ca4f78c73ea58a54ffad784acaea1e3415a58ee54f64f3b7f4ba8b92a"
+EXPECT_MOD="04701aad9b2ac2a6511bea9433535d9d73c14e46bd05cc2f791794662e345d9b"
 EXPECT_NET="1ffc61d0268fd874e5ff0b5f9a85274875c73a31051b5eb7b067092a90ac2336"
 rm -rf "$W" && mkdir -p "$W"
 cat > "$W/patch-sdr-plus.py" << 'PATCHPY_EOF'
@@ -38,6 +41,7 @@ from pathlib import Path
 
 MARK = "# ===== sdrPlus:"
 EXPECT = "18daef1da37a85b5"
+EXPECT_ACK = "a54abd412adc0503"
 NEED = ["# ===== sdrFunk:", "# ===== sdrFunk2:", "def _sdr_status():", "\n_SDR_TILE_JS = ", "sdrBtns(c,d,poll);}", "var t=(SDRN[a]||a||'–');",
         "def _sdr_page(title, body_js, data):", "\n_SDR_HEAD_JS = ", "app = Flask("]
 MAIN_RE = re.compile(r"^if\s+__name__\s*==\s*['\"]__main__['\"]\s*:", re.M)
@@ -75,7 +79,8 @@ def _sdrp_meteor():
     except Exception:
         pass
     nxt = [x for x in (pp.get("passes") or []) if isinstance(x, dict) and (x.get("los") or 0) > now]
-    return {"images": imgs[:40], "passes": nxt[:12], "hist": (ms.get("passes") or [])[-10:][::-1], "tle_t": pp.get("tle_t"), "pred_t": pp.get("t")}
+    sg = (_sdr_load("sdr_status.json", {}) or {}).get("sgp4")
+    return {"sgp4": sg, "images": imgs[:40], "passes": nxt[:12], "hist": (ms.get("passes") or [])[-10:][::-1], "tle_t": pp.get("tle_t"), "pred_t": pp.get("t")}
 
 
 def _sdr_status():
@@ -110,14 +115,20 @@ def _sdrp_img(name):
     from flask import send_from_directory, abort
     if not _SDRP_IMG_RE.match(name or ""):
         abort(404)
-    r = send_from_directory(_sdr_os.path.join(_SDR_BASE, "meteor"), name, max_age=86400)
-    return r
+    d = _sdr_os.path.join(_SDR_BASE, "meteor")
+    try:
+        return send_from_directory(d, name, max_age=86400)
+    except TypeError:
+        return send_from_directory(d, name)
 
 
 _SDRP_METEOR_JS = _SDR_HEAD_JS + """
 function d2(x){return x<10?'0'+x:''+x;}function hm(t){var d=new Date(t*1000);return d2(d.getHours())+':'+d2(d.getMinutes());}
 function dm(t){var d=new Date(t*1000);return d2(d.getDate())+'.'+d2(d.getMonth()+1)+'. '+hm(t);}
-function render(d,st){head(st);var m=document.getElementById('sdrMain');m.textContent='';
+function render(d,st){head(st);var m=document.getElementById('sdrMain');m.textContent='';var tl=(st.status||{}).tools||{};
+if(!tl.satdump||d.sgp4===false){var w=sdrEl('div','card');w.appendChild(sdrEl('div','title','Meteor-Empfang nicht bereit'));
+if(!tl.satdump)w.appendChild(sdrEl('div','sub','satdump: nicht installiert – keine Aufnahme (sudo apt install satdump)'));
+if(d.sgp4===false)w.appendChild(sdrEl('div','sub','Bahnrechnung (sgp4): nicht installiert – keine Überflug-Vorhersage'));m.appendChild(w);}
 var c=sdrEl('div','card');c.appendChild(sdrEl('div','title','🛰 Nächste Meteor-M Überflüge (über '+((d.passes[0]||{}).min_el||20)+'°)'));
 if(!d.passes.length)c.appendChild(sdrEl('div','sub','Keine Vorhersage – noch keine Bahndaten (TLE). Der Planer holt sie, sobald Internet da ist, und rechnet danach offline weiter.'));
 else{var tb=sdrEl('table');var h=sdrEl('tr');['Satellit','Beginn','Ende','max. Höhe','um','Richtung','Dauer'].forEach(function(x){h.appendChild(sdrEl('th','',x));});tb.appendChild(h);
@@ -139,14 +150,19 @@ setInterval(refresh,60000);
 
 
 def _sdrp_page_meteor():
-    return _sdr_page("Meteor-M Wettersatellit", _SDRP_METEOR_JS, {"d": _sdrp_meteor(), "st": _sdr_status()})
+    try:
+        return _sdr_page("Meteor-M Wettersatellit", _SDRP_METEOR_JS, {"d": _sdrp_meteor(), "st": _sdr_status()})
+    except Exception as e:
+        print("sdrPlus /meteor:", e, flush=True)
+        return ('<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>Meteor</title></head><body style="background:#0f172a;color:#e2e8f0;font-family:sans-serif">'
+                '<p>Meteor-Seite: Daten gerade nicht lesbar (%s).</p><p><a style="color:#93c5fd" href="/funk">↩ Funk</a></p></body></html>') % _sdr_html.escape(str(e)[:120])
 
 
 _SDRP_TILE_ADD = r"""var B=d.bc||{},M=d.meteor||{};
 if(B.tools&&(B.tools.redsea||B.tools.welle)||B.fm_n||B.dab_n){var ws=B.warn||[],w=ws.filter(function(x){return x.kind!=='TA'&&(ws[0].last||0)-(x.last||0)<3600;})[0]||ws[0];
 if(w){var red=(w.kind!=='TA');ln(c,(red?'⚠ ':'● ')+'Rundfunk: '+w.src+' '+w.kind+' '+sdrHM(w.last||w.t).slice(-5)+': '+String(w.text||'').slice(0,80),red?'#ef4444':'#eab308');}
-else ln(c,'📻 Rundfunk: '+(B.fm_n||0)+' UKW · '+(B.dab_n||0)+' DAB · keine Warnung'+(B.next?' · nächster Blick '+sdrHM(B.next).slice(-5):''),'#94a3b8');}
-var np=M.next;ln(c,'🛰 Meteor: '+(M.on?'Empfang läuft':(np?'nächster Überflug '+sdrHM(np.aos).slice(-5)+' ('+String(np.sat||'').replace('METEOR-','')+', '+Math.round(np.max_el)+'°)':'keine Vorhersage'))+(M.n_img?' · '+M.n_img+' Bilder':'')+' ›',null,'/meteor');
+else ln(c,'📻 Rundfunk: '+(B.fm_n||0)+' UKW · '+(B.dab_n||0)+' DAB · keine Warnung'+(B.next?' · nächster Blick '+sdrHM(B.next).slice(-5):''),'#94a3b8');}else ln(c,'📻 Rundfunk: redsea/welle-cli nicht installiert','#64748b');
+var np=M.next;ln(c,'🛰 Meteor: '+((B.tools&&B.tools.satdump===false)?'satdump nicht installiert':M.on?'Empfang läuft':(np?'nächster Überflug '+sdrHM(np.aos).slice(-5)+' ('+String(np.sat||'').replace('METEOR-','')+', '+Math.round(np.max_el)+'°)':'keine Vorhersage'))+(M.n_img?' · '+M.n_img+' Bilder':'')+' ›',null,'/meteor');
 """
 
 
@@ -184,6 +200,8 @@ def h16(s):
 def which(src):
     if h16(src) == EXPECT:
         return "vor sdAck"
+    if h16(src) == EXPECT_ACK and src.count("# ===== sdAck:") == 1:
+        return "nach sdAck"
     a, e = "# ===== sdAck:", "# ===== /sdAck =====\n"
     if src.count(a) != 1 or src.count(e) != 1 or "/api/sd_health/ack" not in src:
         return None
@@ -916,7 +934,13 @@ def predict(tles, lat, lon, start, hours=36, min_el=20.0, horizon=8.0):
     try:
         from sgp4.api import Satrec
     except Exception:
-        return None
+        lib = os.path.join(BASE, "sdr_lib")  # Ersatz ohne Debian-Paket: reines Python-sgp4 (vom Patch, sha256-geprueft)
+        if os.path.isdir(os.path.join(lib, "sgp4")) and lib not in sys.path:
+            sys.path.append(lib)
+        try:
+            from sgp4.api import Satrec
+        except Exception:
+            return None
     out = []
     for s in tles:
         try:
@@ -1372,7 +1396,7 @@ class Planner:
                   "freq": {"433": self.cfg["f433"], "aprs": self.cfg["faprs"]}, "home": list(self.saprs.home),
                   "special": ({"kind": self.special["kind"], "job": self.special["queue"][self.special["i"]], "until": int(self.special["sub_end"])} if self.special else None),
                   "next_bc": int(self.last_bc + float(self.cfg.get("bc_interval_s") or 1800)) if self.bc_queue() else None,
-                  "next_pass": self.next_pass(now), "tools": {"redsea": bool(self.tool("redsea")), "welle": bool(self.tool("welle")), "satdump": bool(self.tool("satdump"))}}
+                  "next_pass": self.next_pass(now), "sgp4": predict([], 0, 0, now) is not None, "tools": {"redsea": bool(self.tool("redsea")), "welle": bool(self.tool("welle")), "satdump": bool(self.tool("satdump"))}}
         sig = (st["mode"], st["active"], st["err"], len(st["stick"]), st["until"], bool(self.special))
         if force or sig != self.lastsig or now - self.last_status >= 60:
             write_json(p("sdr_status.json", self.base), st)
@@ -1730,8 +1754,8 @@ R0=$(grep -o 'doPrepperRestore' "$W/pi0.html" | wc -l || true)
 A0=$(grep -o "sda-js\|sdh-" "$W/pi0.html" | wc -l || true)
 
 # ---------- 3) Programme (apt + redsea) - schon vorhandene bleiben, fehlende = Teil wird uebersprungen ----------
-have() { dpkg -s "$1" >/dev/null 2>&1; }
-cand() { apt-cache policy "$1" 2>/dev/null | grep -q 'Candidate: [0-9]'; }
+have() { LC_ALL=C dpkg -s "$1" 2>/dev/null | grep -q '^Status: install ok installed'; }
+cand() { LC_ALL=C apt-cache policy "$1" 2>/dev/null | grep -q 'Candidate: [0-9]'; }
 need_rs=1
 if [[ -x "$REDSEA_BIN" ]] && "$REDSEA_BIN" --version 2>/dev/null | grep -q '1\.3\.1'; then need_rs=0; fi
 PK=(welle.io satdump python3-sgp4 python3-pil)
@@ -1743,12 +1767,20 @@ if [[ ${#MISS[@]} -gt 0 ]]; then
     echo "WARN nur ${FREE} MB frei auf / - installiere keine Pakete (${MISS[*]}); betroffene Teile werden uebersprungen"
   else
     sudo -v
-    sudo apt-get update -qq || echo "WARN apt-get update fehlgeschlagen (offline?)"
+    echo "apt-get update ..."
+    sudo env LC_ALL=C apt-get update -qq || echo "WARN apt-get update fehlgeschlagen (offline?)"
     OKP=(); for p in "${MISS[@]}"; do if cand "$p"; then OKP+=("$p"); else echo "WARN Paket $p nicht verfuegbar"; fi; done
     if [[ ${#OKP[@]} -gt 0 ]]; then
       echo "apt install: ${OKP[*]} (kann einige Minuten dauern) ..."
       # shellcheck disable=SC2024
-      sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends "${OKP[@]}" > "$W/apt.txt" 2>&1 || { tail -5 "$W/apt.txt"; echo "WARN apt install mit Fehler - weiter mit dem, was da ist"; }
+      if ! sudo env LC_ALL=C DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends "${OKP[@]}" > "$W/apt.txt" 2>&1; then
+        tail -4 "$W/apt.txt"; echo "WARN apt install gesamt fehlgeschlagen - versuche einzeln"
+        for p in "${OKP[@]}"; do
+          # shellcheck disable=SC2024
+          sudo env LC_ALL=C DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends "$p" >> "$W/apt.txt" 2>&1 || echo "WARN $p nicht installierbar"
+        done
+      fi
+      for p in "${OKP[@]}"; do have "$p" && echo "  installiert: $p" || echo "  WARN fehlt weiter: $p"; done
     fi
   fi
 fi
@@ -1769,10 +1801,26 @@ if [[ "$need_rs" == 1 ]]; then
     echo "WARN Bauwerkzeuge fehlen - redsea/UKW-RDS wird uebersprungen"
   fi
 fi
-T_RS=0; [[ -x "$REDSEA_BIN" ]] || command -v redsea >/dev/null 2>&1 && T_RS=1
+RS_AT=""; if [[ -x "$REDSEA_BIN" ]]; then RS_AT="$REDSEA_BIN"; else RS_AT=$(command -v redsea 2>/dev/null || true); fi
+T_RS=0; [[ -n "$RS_AT" ]] && T_RS=1 && echo "redsea gefunden: $RS_AT ($("$RS_AT" --version 2>&1 | head -1 | cut -c1-40))"
 T_WE=0; command -v welle-cli >/dev/null 2>&1 && T_WE=1
 T_SD=0; command -v satdump >/dev/null 2>&1 && T_SD=1
-T_SG=0; /usr/bin/python3 -c "import sgp4.api" 2>/dev/null && T_SG=1
+T_SG=0; "${SDR_SG_PY:-/usr/bin/python3}" -c "import sgp4.api" 2>/dev/null && T_SG=1
+NEW_LIB=0
+if [[ "$T_SG" == 0 ]]; then
+  if [[ -f "$DASH_DIR/sdr_lib/sgp4/api.py" ]]; then T_SG=2
+  else
+    echo "sgp4 ohne Debian-Paket: reines Python-sgp4 2.22 von PyPI (sha256-geprueft) nach $DASH_DIR/sdr_lib ..."
+    rm -rf "$W/sg" && mkdir -p "$W/sg"
+    if curl -fsSL --max-time 60 "$SGP4_URL" -o "$W/sg/s.tgz" && echo "$SGP4_SHA  $W/sg/s.tgz" | sha256sum -c - >/dev/null \
+       && tar xzf "$W/sg/s.tgz" -C "$W/sg" && [[ -f "$W/sg/sgp4-2.22/sgp4/api.py" ]]; then
+      mkdir -p "$DASH_DIR/sdr_lib/sgp4" && cp "$W/sg/sgp4-2.22/sgp4/"*.py "$DASH_DIR/sdr_lib/sgp4/" && NEW_LIB=1 && T_SG=2
+      echo "OK sgp4 (reines Python) bereit"
+    else
+      echo "WARN sgp4 nicht ladbar - keine Ueberflug-Vorhersage"
+    fi
+  fi
+fi
 T_PI=0; /usr/bin/python3 -c "import PIL" 2>/dev/null && T_PI=1
 echo "Programme: redsea=$T_RS welle-cli=$T_WE satdump=$T_SD sgp4=$T_SG PIL=$T_PI"
 [[ "$T_RS$T_WE" == "00" ]] && echo "WARN weder redsea noch welle-cli - Rundfunk-Block bleibt aus"
@@ -1789,7 +1837,12 @@ else
   NEW_NET=0; [[ -f "$DASH_DIR/prepper_sdr_net.py" ]] || NEW_NET=1
   rb() {
     echo "ROLLBACK: $1"
+    echo "--- Dashboard-Log (letzte Zeilen) ---"
+    sudo journalctl -u prepper-dashboard --since "${SINCE:-10 min ago}" --no-pager -o cat 2>/dev/null | tail -12 | cut -c1-200 || true
+    echo "--- prepper-sdr-Log ---"
+    sudo journalctl -u "$UNIT" --since "${SINCE:-10 min ago}" --no-pager -o cat 2>/dev/null | tail -5 | cut -c1-200 || true
     cp -a "$F.bak-sdr3-$TS" "$F"
+    [[ "$NEW_LIB" == 1 ]] && rm -rf "$DASH_DIR/sdr_lib"
     [[ -f "$DASH_DIR/prepper_sdr.py.bak-sdr3-$TS" ]] && cp -a "$DASH_DIR/prepper_sdr.py.bak-sdr3-$TS" "$DASH_DIR/prepper_sdr.py"
     if [[ "$NEW_NET" == 1 ]]; then rm -f "$DASH_DIR/prepper_sdr_net.py"; elif [[ -f "$DASH_DIR/prepper_sdr_net.py.bak-sdr3-$TS" ]]; then cp -a "$DASH_DIR/prepper_sdr_net.py.bak-sdr3-$TS" "$DASH_DIR/prepper_sdr_net.py"; fi
     sudo systemctl restart "$UNIT" 2>/dev/null || true
@@ -1817,16 +1870,25 @@ else
     (( i % 10 == 0 )) && echo "  ... $((i*3)) s"
   done
   [[ "$ok" -eq 1 ]] || { rb "Dashboard antwortet nicht"; exit 1; }
+  for i in $(seq 1 20); do [[ "$(code "$B/funk")" == "200" && "$(code "$B/api/sdr/status")" == "200" ]] && break; sleep 3; done
   for i in $(seq 1 15); do python3 -c "import json,sys; assert json.load(open(sys.argv[1])).get('v')==2" "$DASH_DIR/sdr_status.json" 2>/dev/null && break; sleep 2; done
   systemctl is-active --quiet "$UNIT" || { sudo journalctl -u "$UNIT" --since "$SINCE" --no-pager -o cat 2>/dev/null | tail -5; rb "$UNIT laeuft nicht"; exit 1; }
   sc=$("${CURL[@]}" "$B/api/sdr/status" -o "$W/s0.json" -w "%{http_code}" || true)
   [[ "$sc" == "200" ]] || { rb "/api/sdr/status antwortet nicht ($sc)"; exit 1; }
   python3 -c "import json,sys; d=json.load(open(sys.argv[1])); s=d.get('status') or {}; assert d.get('module') and s.get('v')==2 and d['service']=='läuft' and 'bc' in d and 'meteor' in d and 'tools' in s, d" "$W/s0.json" || { rb "/api/sdr/status ungueltig (Planer v2 schreibt keinen Status?)"; exit 1; }
   echo "OK prepper-sdr v2 laeuft, /api/sdr/status mit Rundfunk + Meteor"
-  mc=$("${CURL[@]}" "$B/meteor" -o "$W/meteor.html" -w "%{http_code}" || true)
-  [[ "$mc" == "200" ]] && grep -q 'id="sdrData"' "$W/meteor.html" || { rb "/meteor fehlerhaft ($mc)"; exit 1; }
+  mok=0
+  for i in 1 2 3 4 5 6; do
+    mc=$(curl --compressed -sS --connect-timeout 5 --max-time 60 "$B/meteor" -o "$W/meteor.html" -w "%{http_code}" 2> "$W/meteor.err" || true)
+    if [[ "$mc" == "200" ]] && grep -q 'id="sdrData"' "$W/meteor.html"; then mok=1; break; fi
+    echo "  /meteor Versuch $i: HTTP ${mc:-000} $(head -c 120 "$W/meteor.err" 2>/dev/null) · /funk $(code "$B/funk")"
+    sleep 10
+  done
+  [[ "$mok" == 1 ]] || { head -c 300 "$W/meteor.html" 2>/dev/null; echo; rb "/meteor fehlerhaft (${mc:-000})"; exit 1; }
   for ap in /api/meteor /api/broadcast; do
-    python3 -c "import json,sys; d=json.load(sys.stdin); assert isinstance(d, dict) and len(d)" < <("${CURL[@]}" "$B$ap") || { rb "$ap ungueltig"; exit 1; }
+    aok=0
+    for i in 1 2 3; do python3 -c "import json,sys; d=json.load(sys.stdin); assert isinstance(d, dict) and len(d)" < <("${CURL[@]}" "$B$ap") 2>/dev/null && { aok=1; break; }; sleep 5; done
+    [[ "$aok" == 1 ]] || { rb "$ap ungueltig"; exit 1; }
   done
   ic=$(code "$B/meteor/img/..%2Fconfig.py"); [[ "$ic" == "404" ]] || { rb "/meteor/img nicht abgesichert ($ic)"; exit 1; }
   echo "OK /meteor /api/meteor /api/broadcast (Bildpfad abgesichert)"
