@@ -20,10 +20,10 @@ CURL=(curl --compressed -s --connect-timeout 3 --max-time 40)
 echo "=== gpsLearn apply, Dashboard-Port $PORT (config.py: ${CFG_PORT:-fehlt}) ==="
 BASE_MOD="9edc599e5378757b56ac41ce98c44d75a7d172f289a1e33c1db944d93a59feca"
 BASE_GPS="929c4c8518616d8e57faaa9358419a569bcaf1763ea23f245c410c259153cf02"
-EXPECT_PATCH="23accdf1ce8406dbc83b0ca09c6e5b3c129d56bb19ab036e5fc7f82942477d85"
+EXPECT_PATCH="85a2b41219a06be890a0c258b2c25b828146c9e82fd285bbd1ab7acaf0d2953e"
 EXPECT_MOD="9edc599e5378757b56ac41ce98c44d75a7d172f289a1e33c1db944d93a59feca"
 EXPECT_NET="1ffc61d0268fd874e5ff0b5f9a85274875c73a31051b5eb7b067092a90ac2336"
-EXPECT_GPS="7c2ee8ca26263943c074a4446462d3b2e484fad0de1cbf8eae3df8e71cf0e893"
+EXPECT_GPS="2029ad85a90675a47d23a3c6603ef97d2ab740c3aaa0d57bed2183e41b58209d"
 rm -rf "$W" && mkdir -p "$W"
 cat > "$W/patch-gps-learn.py" << 'PATCHPY_EOF'
 #!/usr/bin/env python3
@@ -43,12 +43,12 @@ NEED = ["# ===== sdrNoise2:", "# ===== /sdrNoise2 =====", "var G=D.gps||{};if(G.
         "[].forEach.call(rows.children,function(x){x.className='sdrn-row';});r.className='sdrn-row sel';drawQ();};rows.appendChild(r);});",
         "# ===== sdrRf:", "# ===== sdrRds:", "# ===== sdrStick:", "# ===== sdrAct:", "# ===== sdrPreset:", "# ===== sdrPlus:", "# ===== sdAck:", "# ===== sdrFunk2:", "# ===== sdrFunk:", "app = Flask("]
 MAIN_RE = re.compile(r"^if\s+__name__\s*==\s*['\"]__main__['\"]\s*:", re.M)
-BLOCK = r'''# ===== gpsLearn: Dach-GPS-Zeilen GPS/GLO getrennt: lernt (grau blinkend, Proben/Rest-h) / keine Daten (grau ruhig) / bewertet; nur Anzeige =====
+BLOCK = r'''# ===== gpsLearn: Dach-GPS-Zeilen GPS/GLO getrennt: lernt (grau blinkend, Proben/Rest-h) / keine Daten (grau ruhig) / bewertet; je System eigene 24h/14d-Kurve mit Grundlinie; nur lesen/anzeigen =====
 _GPSL_OLD_START = "var G=D.gps||{};if(G.src){var GS=G.G||null,GR=G.R||null;"
 _GPSL_OLD_END = "rows.insertBefore(grow('dachgps','GPS',COL[G.lvl]||COL.grau,t1,tip),rows.firstChild);}\n"
 _GPSL_JS = r"""var G=D.gps||{};if(G.src){var SY=G.sys||{};function fx(m){return m>=3?'3D':(m===2?'2D':'kein Fix');}
 function grow(id,nm,col,blink,txt,tip){var x=el('div','sdrn-row'+(sel===id?' sel':''));var dd=el('span','dot'+(blink?' blink':''));dd.style.background=col;x.appendChild(dd);x.appendChild(el('span','nm',nm));x.appendChild(el('span','tx',txt));x.title=tip;
-x.onclick=function(){sel='dachgps';[].forEach.call(rows.children,function(y){y.classList.remove('sel');});x.classList.add('sel');drawQ();};return x;}
+x.onclick=function(){sel=id;[].forEach.call(rows.children,function(y){y.classList.remove('sel');});x.classList.add('sel');drawQ();};return x;}
 var bad=(G.lvl==='gelb'||G.lvl==='rot');
 function srow(k,nm){var P=SY[k]||null,E=G[k]||null,head=(k==='G'?'GPS':'GLONASS');
 if(G.ok===false){return [COL.grau,false,(k==='G'?'Dach-GPS nicht erreichbar'+(G.since?' seit '+dm(G.since):'')+(typeof G.snr==='number'?' · zuletzt '+nf(G.snr)+' dB-Hz, '+G.used+'/'+G.seen+' Sat ('+dm(G.last_t)+')':''):head+': –')];}
@@ -72,20 +72,63 @@ _GPSL_CSS = """<style id="gpsl-css">
 </style>"""
 
 
+_GPSL_DRAW_OLD = "function drawQ(){"
+_GPSL_DRAW = ("function drawQ(){if(sel==='dachgps'||sel==='dachglo'){var k0=sel==='dachgps'?'G':'R',S0=((G0.sys||{})[k0])||{};"
+              "chart(box,(((D.ghist_s||{})[k0]||{})[gq()])||[],'snr',k0==='G'?'#93c5fd':'#c4b5fd',S0.b_snr);return;}")
+
+
+def _gpsl_hist(fn):
+    """24 h Rohpunkte + 14 d Stundenmedian eines Systems aus sdr_gps_snr_gps/glo.json (nur lesen)."""
+    h = _sdr_load(fn, {}) or {}
+    h = h if isinstance(h, dict) else {}
+    pts = [x for x in (h.get("snr") or []) if isinstance(x, dict) and isinstance(x.get("ts"), (int, float))
+           and isinstance(x.get("snr"), (int, float)) and x["snr"] == x["snr"]]
+    now = _sdr_time.time()
+    hours = {}
+    for x in pts:
+        hours.setdefault(int(x["ts"] // 3600), []).append(x)
+    wk = []
+    for hk in sorted(hours):
+        v = sorted(y["snr"] for y in hours[hk])
+        nv = sorted(y["n"] for y in hours[hk] if isinstance(y.get("n"), (int, float)))
+        row = {"ts": hk * 3600 + 1800, "snr": v[len(v) // 2]}
+        if nv:
+            row["n"] = nv[len(nv) // 2]
+        wk.append(row)
+    return {"d": [x for x in pts if now - x["ts"] <= 86400][-720:], "w": wk[-24 * 14:]}
+
+
 def _gpsl_patch():
     global _SDRN_JS
     js = _SDRN_JS
-    if "gpsl-blink" in js or "srow('G')" in js or js.count(_GPSL_OLD_START) != 1:
+    if "gpsl-blink" in js or "srow('G')" in js or js.count(_GPSL_OLD_START) != 1 or js.count(_GPSL_DRAW_OLD) != 1 or "D.ghist_s" in js:
         return 0
     a = js.index(_GPSL_OLD_START)
     b = js.find(_GPSL_OLD_END, a)
     if b < 0:
         return 0
-    _SDRN_JS = js[:a] + _GPSL_JS + js[b + len(_GPSL_OLD_END):]
+    js = js[:a] + _GPSL_JS + js[b + len(_GPSL_OLD_END):]
+    _SDRN_JS = js.replace(_GPSL_DRAW_OLD, _GPSL_DRAW)
     return 1
 
 
 _gpsl_block0 = _sdrn_block
+_gpsl_data0 = _sdrn_data
+
+
+def _sdrn_data():
+    d = _gpsl_data0()
+    try:
+        d["ghist_s"] = {"G": _gpsl_hist("sdr_gps_snr_gps.json"), "R": _gpsl_hist("sdr_gps_snr_glo.json")}
+        g = d.get("gps") or {}
+        for k in ("G", "R"):
+            x, t = (g.get("sys") or {}).get(k) or {}, g.get("last_t")
+            v, hd = x.get("now_ss"), d["ghist_s"][k]["d"]
+            if g.get("ok") and x.get("now_n") and isinstance(v, (int, float)) and isinstance(t, (int, float)) and (not hd or t > hd[-1]["ts"]):
+                hd.append({"ts": t, "snr": v, "n": x.get("now_n")})
+    except Exception:
+        d["ghist_s"] = {}
+    return d
 
 
 def _sdrn_block():
@@ -93,7 +136,11 @@ def _sdrn_block():
 
 
 try:
-    print("gpsLearn aktiv: Teile=%s/1" % _gpsl_patch(), flush=True)
+    _gpsl_am = _sdrn_sys.modules.get("archive_store")
+    if _gpsl_am is not None and isinstance(getattr(_gpsl_am, "FILE_SERIES", None), dict):
+        _gpsl_am.FILE_SERIES.setdefault("sdr_gps_snr_gps", ("sdr_gps_snr_gps.json", "snr"))
+        _gpsl_am.FILE_SERIES.setdefault("sdr_gps_snr_glo", ("sdr_gps_snr_glo.json", "snr"))
+    print("gpsLearn aktiv: Teile=%s/1, Archiv=%s" % (_gpsl_patch(), _gpsl_am is not None), flush=True)
 except Exception as _gpsl_e:
     print("gpsLearn:", _gpsl_e, flush=True)
 # ===== /gpsLearn =====
@@ -3611,6 +3658,30 @@ def sys_progress(hist, lk, cur, now):
     return out
 
 
+def sys_mean(pt, s):
+    """Mittlere ss eines Systems (G/R) ueber alle Hoehenbaender, gewichtet mit Satellitenzahl."""
+    g, gn = (pt or {}).get("g") or {}, (pt or {}).get("gn") or {}
+    if not isinstance(g, dict) or not isinstance(gn, dict):
+        return None, 0
+    sw = n = 0.0
+    for _lo, _hi, k in EBINS:
+        v, c = g.get(s + k), gn.get(s + k)
+        c = float(c) if _fin(c) and c > 0 else 1.0
+        if _fin(v):
+            sw += v * c
+            n += c
+    return (round(sw / n, 1), int(n)) if n else (None, 0)
+
+
+SYS_FILES = {"G": "sdr_gps_snr_gps.json", "R": "sdr_gps_snr_glo.json"}
+
+
+def sys_base(hs, now):
+    """Grundlinie je System = Median der Punkte 1 h - 7 d alt (mind. 36), sonst None."""
+    v = sorted(x["snr"] for x in hs if _fin(x.get("snr")) and 3600 <= now - x.get("ts", 0) < 7 * 86400)
+    return round(v[len(v) // 2], 1) if len(v) >= 36 else None
+
+
 class GpsWatch:
     """Thread: alle gps_interval_s eine kurze Lesung. Verlauf sdr_gps_hist.json {"snr": [...]} (Archiv sdr_gps_snr),
     Punkt hoechstens alle 5 min, geschrieben hoechstens alle 30 min. Ampel = schwaechste der letzten gps_persist Roh-Ampeln."""
@@ -3635,6 +3706,16 @@ class GpsWatch:
         self.last_save = time.time()
         self.n = 0
         self._prog, self._prog_n = {}, None
+        d = fh.rsplit("/", 1)[0] if "/" in fh else "."
+        self.fs, self.hs = {}, {}
+        for k, fn in SYS_FILES.items():
+            self.fs[k] = d + "/" + fn
+            try:
+                hx = load_json(self.fs[k], None) or {}
+            except Exception:
+                hx = {}
+            hx = hx if isinstance(hx, dict) else {}
+            self.hs[k] = [x for x in (hx.get("snr") or []) if isinstance(x, dict) and _fin(x.get("ts")) and _fin(x.get("snr"))][-5000:]
 
     def step(self, now=None, objs=None):
         now = int(now or time.time())
@@ -3662,6 +3743,10 @@ class GpsWatch:
                 if now >= CLOCK_OK and (not prev or now - prev.get("ts", 0) >= 290 or now < prev.get("ts", 0) or (show in ("gelb", "rot"))):
                     self.h.append({k2: pt.get(k2) for k2 in ("ts", "snr", "top4", "seen", "used", "mode", "hdop", "g", "gn")})
                     self.h = self.h[-5000:]
+                    for k in SYS_FILES:
+                        m, nn = sys_mean(pt, k)
+                        if m is not None:
+                            self.hs[k] = (self.hs[k] + [{"ts": now, "snr": m, "n": nn}])[-5000:]
                     self.dirty = True
                 self.cur = dict(info, lvl=show, raw=lvl, t=now, ok=True)
             else:
@@ -3676,6 +3761,9 @@ class GpsWatch:
         cut = now - self.KEEP_S
         self.h = [x for x in self.h if cut <= x.get("ts", 0) <= now + 3600][-5000:]
         self.write_json(self.fh, {"snr": self.h, "src": "gpsd %s:%d" % (GPSD_HOST, GPSD_PORT)})
+        for k in SYS_FILES:
+            self.hs[k] = [x for x in self.hs[k] if cut <= x.get("ts", 0) <= now + 3600][-5000:]
+            self.write_json(self.fs[k], {"snr": self.hs[k], "sys": k, "src": "gpsd %s:%d" % (GPSD_HOST, GPSD_PORT)})
         self.dirty, self.last_save = False, now
 
     def summary(self):
@@ -3686,7 +3774,12 @@ class GpsWatch:
                       "used": lk.get("used"), "mode": lk.get("mode"), "hdop": lk.get("hdop"), "last_t": lk.get("ts"),
                       "iv": int(self.cfg.get("gps_interval_s") or 120)})
             if self._prog_n != (self.n, len(self.h)):
-                self._prog, self._prog_n = sys_progress(self.h, lk, c, c.get("t") or time.time()), (self.n, len(self.h))
+                t0 = c.get("t") or time.time()
+                self._prog, self._prog_n = sys_progress(self.h, lk, c, t0), (self.n, len(self.h))
+                for k in SYS_FILES:
+                    if isinstance(self._prog.get(k), dict):
+                        self._prog[k]["b_snr"] = sys_base(self.hs.get(k) or [], t0)
+                        self._prog[k]["hist_n"] = len(self.hs.get(k) or [])
             c["sys"] = self._prog
         return c
 
@@ -3802,6 +3895,24 @@ def selftest():
     assert sp["R"]["state"] == "keine Daten" and sp["R"]["now_n"] == 0 and sp["G"]["state"] == "lernt", sp
     bad = GpsWatch("/x", {}, lambda f, d: "kaputt", lambda f, d: None, lambda *x: None)
     assert bad.h == [] and bad.summary()["lvl"] == "grau"
+    # Verlauf je System: getrennte Dateien, begrenzt, atomar ueber write_json (keepLast), kaputte Eintraege raus
+    wr = {}
+    g = GpsWatch("/tmp/x/sdr_gps_hist.json", {}, lambda f, d: {"snr": [{"ts": now - 99, "snr": 40.0}, "kaputt", {"ts": now, "snr": float("nan")}] * 3000}, lambda f, d: wr.__setitem__(f.rsplit("/", 1)[-1], d), lambda *x: None)
+    assert all(len(g.hs[k]) <= 5000 and all(_fin(x["snr"]) for x in g.hs[k]) for k in "GR"), {k: len(g.hs[k]) for k in "GR"}
+    g.hs = {"G": [], "R": []}
+    g.h = []
+    for k in range(3):
+        g.step(now + k * 300, _synth(now, rnd=rnd))
+    g.step(now + 1200, _synth(now, glo=False, rnd=rnd))
+    g.save(now + 1200)
+    assert set(wr) == {"sdr_gps_hist.json", "sdr_gps_snr_gps.json", "sdr_gps_snr_glo.json"}, wr.keys()
+    assert len(wr["sdr_gps_snr_gps.json"]["snr"]) == 4 and len(wr["sdr_gps_snr_glo.json"]["snr"]) == 3, wr
+    mg, mr = wr["sdr_gps_snr_gps.json"]["snr"][0]["snr"], wr["sdr_gps_snr_glo.json"]["snr"][0]["snr"]
+    assert 35 < mg < 45 and 30 < mr < 42 and mg > mr, (mg, mr)
+    hb = [{"ts": now - 7200 - i * 300, "snr": 40.0 + (i % 3)} for i in range(40)]
+    assert sys_base(hb, now) == 41.0 and sys_base(hb[:30], now) is None
+    assert sys_mean({"g": {"R1": 30.0, "R2": 40.0}, "gn": {"R1": 1, "R2": 3}}, "R") == (37.5, 4)
+    assert sys_mean({"g": "x"}, "G") == (None, 0)
     print("prepper_gps selftest ok")
     return True
 
@@ -4146,7 +4257,7 @@ assert h.count('id="sdrn-js"') == 1 and h.count('id="sdrg-js"') == 1 and h.count
 assert "Störsender / QRM" in h and "Gewitter-Hinweis" in h and "Dach-GPS " in h and "D.ghist" in h and "sdrn-car" in h and "Stick-L1 (Nebenwert)" in h, "Inhalt"
 assert "grid-column:1/-1" in h and "text-overflow:ellipsis" in h and "white-space:nowrap" in h, "Layout"
 assert " neue Träger: '" not in h, "Traeger noch in einer Zeile"
-assert h.count('id="gpsl-css"') == 1 and "srow('G')" in h and "gpsl-blink" in h and "prefers-reduced-motion" in h and "keine Satelliten/Daten" in h and "Grundlinie lernt oder keine" not in h, "gpsLearn fehlt"
+assert h.count('id="gpsl-css"') == 1 and "srow('G')" in h and "gpsl-blink" in h and "prefers-reduced-motion" in h and "keine Satelliten/Daten" in h and "D.ghist_s" in h and "sel==='dachglo'" in h and "Grundlinie lernt oder keine" not in h, "gpsLearn fehlt"
 assert h.count('id="sdrn2-css"') == 1 and "COL.trend" in h and "dachglo" in h and "Schwelle +" in h and "Trend steigend" in h, "sdrNoise2 fehlt"
 h0 = open(sys.argv[2], encoding="utf-8", errors="replace").read()
 import re
@@ -4173,10 +4284,20 @@ for k in ('G', 'R'):
     x = sy[k]
     print('  %-7s jetzt %s Sat (>=10 Grad, ss>0), mittlere ss %s dB-Hz · Proben gesamt %s, fuer Grundlinie %s ueber %s h, bestes Hoehenband %s/24 · %s%s' % (
         x['name'], x['now_n'], x['now_ss'], x['samples'], x['ref'], x['span_h'], x['best_bin'], x['state'], (' (noch ~%s h)' % x['eta_h']) if x['state'] == 'lernt' else ''))
+    assert 'b_snr' in x and 'hist_n' in x, x
+    print('          eigene Kurve: %s Punkte gespeichert (Datei %s), Grundlinie %s' % (x['hist_n'], 'sdr_gps_snr_gps.json' if k == 'G' else 'sdr_gps_snr_glo.json', ('%s dB-Hz' % x['b_snr']) if x['b_snr'] is not None else 'lernt'))
 " 2>&1 || echo FEHLER)
+  GH=$("${CURL[@]}" "$B/api/sdr/noise" | python3 -c "
+import json,sys
+h=json.load(sys.stdin).get('ghist_s') or {}
+assert set(h) == {'G', 'R'} and all(isinstance(h[k].get('d'), list) and isinstance(h[k].get('w'), list) for k in h), h
+print('  Kurven /api/sdr/noise: GPS %d/%d, GLONASS %d/%d Punkte (24h/14d)' % (len(h['G']['d']), len(h['G']['w']), len(h['R']['d']), len(h['R']['w'])))
+" 2>&1 || echo FEHLER)
+  [[ "$GH" != *FEHLER* ]] || { echo "$GH"; rb "/api/sdr/noise ohne Kurven je System"; exit 1; }
   [[ "$GSYS" != *FEHLER* && "$GSYS" == *GLONASS* ]] || { echo "$GSYS"; rb "Dach-GPS ohne Angaben je System"; exit 1; }
   echo "OK Dach-GPS je System:"
   echo "$GSYS"
+  echo "$GH"
 fi
 fail=0
 for p in "${PAGES[@]}"; do
