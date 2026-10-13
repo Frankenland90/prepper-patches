@@ -26,7 +26,7 @@ echo "=== sdrDual apply, Dashboard-Port $PORT ==="
 NEW_MOD16="78b9106899d1fbbd"
 EXPECT_MOD="78b9106899d1fbbd93e045c44886da22073a6d4b47b6561cbec6f6459704af72"
 EXPECT_PATCH="5f46db7e0f5eac6f1a4176bfc1a27e94fdfef92cd6917c468145297db6a93798"
-EXPECT_BLK="d5c907a45b46e423d2c8667fbdde3e95a6a1da792df4dcc15675f16362fb9caf"
+EXPECT_BLK="fc2b43fc754c6317610eb920530ba8072f628fb51dac5a26ec4e196ff08d19dd"
 rm -rf "$W" && mkdir -p "$W"
 cat > "$W/prepper_sdr.py" << 'MODPY_EOF'
 #!/usr/bin/env python3
@@ -4068,6 +4068,15 @@ def _sdrui_data():
                  "label1": "Stick 1 · SN %s · %s" % (du.get("sn1"), "Rundfunk fest" if du.get("role1") == "bc" else ("fehlt" if miss1 else "alles (Einzelbetrieb)")),
                  "label2": "Stick 2 · SN %s · %s" % (du.get("sn2"), "Wechselbetrieb" if du.get("role2") == "rot" else ("fehlt" if miss2 else "alles (Einzelbetrieb)")),
                  "h1": h1, "h2": h2, "active2": s2.get("active"), "ppm2": (s2.get("cal") or {}).get("applied")}
+    if miss1 and not miss2:
+        cs = dict((k, "S2") for k in ("433", "aprs", "bc", "asa", "meteor", "act", "noise", "cal"))
+    elif miss2 and not miss1:
+        cs = dict((k, "S1") for k in ("433", "aprs", "bc", "asa", "meteor", "act", "noise", "cal"))
+    elif miss1 and miss2:
+        cs = {}
+    else:
+        cs = {"bc": "S1", "asa": "S1", "cal": "S1+S2", "433": "S2", "aprs": "S2", "meteor": "S2", "act": "S2", "noise": "S2"}
+    d["dual"]["chip_stick"] = cs
     d["shares2"] = [dict(x, name=names.get(x.get("k"), x.get("k"))) for x in (st.get("shares2") or [])] if not miss2 else []
     if miss1:
         d["shares"] = []
@@ -4099,8 +4108,9 @@ var l1=el('div','sd-lb '+((U.h1||{}).lvl||''),U.label1+' · '+((U.h1||{}).txt||'
 if(!(D.shares||[]).length){b1.style.display='none';}
 var lg1=b1.nextSibling;var l2=el('div','sd-lb '+((U.h2||{}).lvl||''),U.label2+' · '+((U.h2||{}).txt||'')+(U.active2?' · jetzt '+U.active2:''));var bb=bars(D.shares2);
 var ref=lg1?lg1.nextSibling:null;c.insertBefore(l2,ref);if((D.shares2||[]).length){c.insertBefore(bb[0],ref);c.insertBefore(bb[1],ref);}
+var CS=U.chip_stick||{};var ch=c.querySelectorAll('.su-chip');for(var i=0;i<ch.length;i++){var k=ch[i].dataset.k,v=CS[k];var l1=ch[i].querySelector('.su-l1');if(!v||!l1||l1.querySelector('.sd-st'))continue;var bd=el('span','sd-st',v);bd.title=v==='S1'?'läuft auf Stick 1 (SN '+U.sn1+')':(v==='S2'?'läuft auf Stick 2 (SN '+U.sn2+')':'je Stick eigene Kalibrierung');var nm=l1.querySelector('.su-nm');if(nm&&nm.nextSibling)l1.insertBefore(bd,nm.nextSibling);else l1.appendChild(bd);}
 var s2=c.querySelector('.sl-s2');if(s2)s2.textContent='🔌 '+U.mode+(U.ppm2!==undefined&&U.ppm2!==null?' · Stick 2 Korrektur '+(U.ppm2>0?'+':'')+U.ppm2+' ppm':'');};
-})();</script><style id="sdrdual-css">#sdrUiCard .sd-lb{font-size:.8rem;font-weight:600;margin-top:4px;overflow-wrap:anywhere}#sdrUiCard .sd-lb.rot{color:#fca5a5}#sdrUiCard .sd-lb.gelb{color:#fde68a}</style>"""
+})();</script><style id="sdrdual-css">#sdrUiCard .sd-lb{font-size:.8rem;font-weight:600;margin-top:4px;overflow-wrap:anywhere}#sdrUiCard .sd-lb.rot{color:#fca5a5}#sdrUiCard .sd-lb.gelb{color:#fde68a}#sdrUiCard .sd-st{flex:0 0 auto;font-size:.68rem;font-weight:700;padding:0 4px;border-radius:4px;border:1px solid #475569;color:#cbd5e1;background:#1e293b}</style>"""
 
 
 def _sd_selftest():
@@ -4292,6 +4302,81 @@ if "sdr-css2" not in _BR24_JS:
 _SD_JS = _SD_JS.replace("</style>", "#sdrUiCard .su-chip[data-k=asa] .su-l2{white-space:normal;overflow-wrap:anywhere;text-overflow:clip}</style>", 1)
 
 
+# --- sdrDual: Status robust lesen (falsche Typen aus sdr_status.json nie bis in die Anzeige; sonst 'nicht verfuegbar') ---
+_SD_DICT = ("dual", "s2", "stick_health", "stick_health2", "cal", "gps", "noise", "noise_diag", "slices", "tools", "lage", "freq", "tcp",
+            "counts", "stick2", "evlog", "linelog", "special", "next_pass")
+_SD_LIST = ("shares", "shares2", "sched", "auto", "others", "stderr", "home")
+_SD_NONE_OK = ("special", "next_pass", "evlog")
+_SD_NOSTAT = [False]
+
+
+def _sd_clean(st):
+    if not isinstance(st, dict):
+        return {}
+    st = dict(st)
+    for k in _SD_DICT:
+        if k in st and not isinstance(st[k], dict):
+            st[k] = None if k in _SD_NONE_OK else {}
+    for k in _SD_LIST:
+        if k in st and not isinstance(st[k], list):
+            st[k] = []
+    for k in ("shares", "shares2", "sched"):
+        st[k] = [x for x in st[k] if isinstance(x, dict)] if isinstance(st.get(k), list) else st.get(k)
+        if st[k] is None:
+            st.pop(k)
+    if isinstance(st.get("noise"), dict):
+        n = dict(st["noise"])
+        for k in ("qrm", "thunder"):
+            if k in n and not isinstance(n[k], dict):
+                n[k] = {}
+        if "bands" in n and not isinstance(n["bands"], list):
+            n["bands"] = []
+        st["noise"] = n
+    if isinstance(st.get("lage"), dict) and not isinstance(st["lage"].get("sw"), dict):
+        st["lage"] = dict(st["lage"], sw={})
+    if isinstance(st.get("s2"), dict):
+        s2 = dict(st["s2"])
+        for k in ("stick_health", "cal", "special"):
+            if k in s2 and not isinstance(s2[k], dict):
+                s2[k] = None if k == "special" else {}
+        if "shares" in s2 and not isinstance(s2["shares"], list):
+            s2["shares"] = []
+        st["s2"] = s2
+    for k in ("t", "since", "started"):
+        if k in st and not isinstance(st[k], (int, float)):
+            st[k] = 0
+    return st
+
+
+_sd_orig_load = _sdr_load
+
+
+def _sdr_load(name, default):
+    v = _sd_orig_load(name, default)
+    if name == "sdr_status.json":
+        return {} if _SD_NOSTAT[0] else _sd_clean(v)
+    return v
+
+
+_sd_orig_data3 = _sdrui_data
+
+
+def _sdrui_data():
+    try:
+        return _sd_orig_data3()
+    except Exception as e:
+        print("sdrDual: SDR-Daten nicht verfuegbar (%s) - Anzeige ohne Status" % str(e)[:120], flush=True)
+        _SD_NOSTAT[0] = True
+        try:
+            d = _sd_orig_data3()
+        finally:
+            _SD_NOSTAT[0] = False
+        if isinstance(d.get("krise"), dict):
+            d["krise"] = dict(d["krise"], txt="SDR-Status nicht verfügbar", lvl="gelb")
+        d["err"] = "SDR-Status nicht verfügbar"
+        return d
+
+
 def _sd_asa_selftest():
     now = 1760000000
     b = {"dab": {"5C": {"t": now - 60}}}
@@ -4314,6 +4399,11 @@ def _sd_asa_selftest():
     pl = _sd_bc_plan(st, now)
     assert pl["run"] is None and pl["br24"] == now + 500 and pl["asa"] == now + 620, pl
     assert _sd_split("BR24 empfangen · DAB 11D · zuletzt 13.10.2026 12:50:00 · ASA DE ok") == ("BR24 empfangen · DAB 11D", "zuletzt 13.10.2026 12:50:00")
+    bad = {"t": "x", "dual": "x", "s2": {"cal": "x", "stick_health": "x", "shares": "x"}, "stick_health": "x", "noise": {"qrm": "gruen", "bands": "x"},
+           "shares": "x", "sched": ["x", {"k": "bc"}], "lage": {"sw": "x"}, "next_pass": "x", "special": "bc"}
+    c = _sd_clean(bad)
+    assert c["dual"] == {} and c["s2"]["cal"] == {} and c["s2"]["shares"] == [] and c["noise"]["qrm"] == {} and c["sched"] == [{"k": "bc"}] and c["lage"]["sw"] == {} and c["next_pass"] is None and c["special"] is None and c["t"] == 0, c
+    assert _sd_clean("x") == {}
     for js in (_SD_LAGE_JS, _SD_RF_JS):
         assert "POST" not in js and "method" not in js and js.count("fetch(") == js.count("fetch('/api/br24',") == 1 and "</script" not in js
     return True
@@ -4430,16 +4520,22 @@ else
     sudo journalctl -u prepper-dashboard --since "$SINCE" --no-pager -o cat 2>/dev/null | tail -8 | cut -c1-200 || true
     sudo journalctl -u "$UNIT" --since "$SINCE" --no-pager -o cat 2>/dev/null | tail -6 | cut -c1-200 || true
     cp -a "$F.bak-sdrdual-$TS" "$F.rb" && mv -f "$F.rb" "$F"
+    sudo systemctl stop "$UNIT" || true
     [[ -f "$DASH_DIR/sdr_config.json.bak-sdrdual-$TS" ]] && cp -a "$DASH_DIR/sdr_config.json.bak-sdrdual-$TS" "$DASH_DIR/sdr_config.json"
+    [[ -f "$DASH_DIR/sdr_lage.json.bak-sdrdual-$TS" ]] && cp -a "$DASH_DIR/sdr_lage.json.bak-sdrdual-$TS" "$DASH_DIR/sdr_lage.json"
     cp -a "$DASH_DIR/prepper_sdr.py.bak-sdrdual-$TS" "$DASH_DIR/prepper_sdr.py.rb" && mv -f "$DASH_DIR/prepper_sdr.py.rb" "$DASH_DIR/prepper_sdr.py"
     sudo systemctl restart "$UNIT" || true; sudo systemctl restart prepper-dashboard.service || true
     for i in $(seq 1 80); do [[ "$(code "$B/")" == 200 ]] && break; sleep 3; done
-    echo "alter Stand wieder aktiv (HTTP / = $(code "$B/"), /funk = $(code "$B/funk")), dashboard.py $(sha256sum "$F" | cut -c1-16), prepper_sdr.py $(sha256sum "$DASH_DIR/prepper_sdr.py" | cut -c1-16)"
+    sleep 3
+    echo "alter Stand wieder aktiv (HTTP / = $(code "$B/"), /funk = $(code "$B/funk")), dashboard.py $(sha256sum "$F" | cut -c1-16), prepper_sdr.py $(sha256sum "$DASH_DIR/prepper_sdr.py" | cut -c1-16), Dienste: $UNIT=$(systemctl is-active "$UNIT" 2>/dev/null) prepper-dashboard=$(systemctl is-active prepper-dashboard 2>/dev/null)"
+    python3 -c "import json,sys; s=json.load(open(sys.argv[1])).get('stick2'); print('sdr_config.json stick2 jetzt:', json.dumps(s, ensure_ascii=False))" "$DASH_DIR/sdr_config.json" 2>/dev/null || true
+    [[ "$(sha256sum "$DASH_DIR/prepper_sdr.py" | cut -c1-16)" == "$(sha256sum "$DASH_DIR/prepper_sdr.py.bak-sdrdual-$TS" | cut -c1-16)" && "$(sha256sum "$F" | cut -c1-16)" == "$(sha256sum "$F.bak-sdrdual-$TS" | cut -c1-16)" ]] && echo "OK Rollback vollstaendig (beide Dateien = Sicherung)" || echo "WARNUNG: Rollback unvollstaendig - Sicherungen: $F.bak-sdrdual-$TS"
   }
   cp -a "$F" "$F.bak-sdrdual-$TS"
   cp -a "$DASH_DIR/prepper_sdr.py" "$DASH_DIR/prepper_sdr.py.bak-sdrdual-$TS"
   cp -a "$DASH_DIR/sdr_config.json" "$DASH_DIR/sdr_config.json.bak-sdrdual-$TS"
-  for pat in "$F.bak-sdrdual-" "$DASH_DIR/prepper_sdr.py.bak-sdrdual-" "$DASH_DIR/sdr_config.json.bak-sdrdual-"; do { ls -1t "$pat"* 2>/dev/null || true; } | tail -n +$((KEEP_LAST + 1)) | while read -r o; do rm -f -- "$o"; done; done
+  [[ -f "$DASH_DIR/sdr_lage.json" ]] && cp -a "$DASH_DIR/sdr_lage.json" "$DASH_DIR/sdr_lage.json.bak-sdrdual-$TS"
+  for pat in "$F.bak-sdrdual-" "$DASH_DIR/prepper_sdr.py.bak-sdrdual-" "$DASH_DIR/sdr_config.json.bak-sdrdual-" "$DASH_DIR/sdr_lage.json.bak-sdrdual-"; do { ls -1t "$pat"* 2>/dev/null || true; } | tail -n +$((KEEP_LAST + 1)) | while read -r o; do rm -f -- "$o"; done; done
   install -m 644 "$M" "$DASH_DIR/prepper_sdr.py.new" && mv -f "$DASH_DIR/prepper_sdr.py.new" "$DASH_DIR/prepper_sdr.py" || { rb "Modul installieren"; exit 1; }
   if [[ "$same_d" == 0 ]]; then cp "$W/work/dashboard.py" "$F.new" && chmod --reference="$F.bak-sdrdual-$TS" "$F.new" && mv -f "$F.new" "$F" || { rb "dashboard installieren"; exit 1; }; fi
   "$VPY" -W error -m py_compile "$F" "$DASH_DIR/prepper_sdr.py" || { rb "py_compile"; exit 1; }
