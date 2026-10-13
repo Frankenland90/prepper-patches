@@ -23,10 +23,10 @@ B="http://127.0.0.1:${PORT}"
 CURL=(curl --compressed -s --connect-timeout 3 --max-time 40)
 [[ -x "$VPY" ]] || VPY=python3
 echo "=== sdrDual apply, Dashboard-Port $PORT ==="
-NEW_MOD16="bfaa9f172e33b8c1"
-EXPECT_MOD="bfaa9f172e33b8c1b8c1d54a9b4f40237493297599b5de9cfa8c4c9cce649308"
+NEW_MOD16="78b9106899d1fbbd"
+EXPECT_MOD="78b9106899d1fbbd93e045c44886da22073a6d4b47b6561cbec6f6459704af72"
 EXPECT_PATCH="5f46db7e0f5eac6f1a4176bfc1a27e94fdfef92cd6917c468145297db6a93798"
-EXPECT_BLK="0d249f9c8eedffb79fb7197bbc3af7b78b5eee3cdc1838d5974e824ed3704095"
+EXPECT_BLK="d5c907a45b46e423d2c8667fbdde3e95a6a1da792df4dcc15675f16362fb9caf"
 rm -rf "$W" && mkdir -p "$W"
 cat > "$W/prepper_sdr.py" << 'MODPY_EOF'
 #!/usr/bin/env python3
@@ -3589,8 +3589,22 @@ def selftest_noise2(tmp):
 
 
 def selftest_dual():
+    """hermetisch: eigenes Temp-Verzeichnis, feste Uhr, numpy-Verfuegbarkeit fest vorgegeben (unabhaengig von Live-Dateien/Interpreter)."""
     import tempfile
-    tmp = tempfile.mkdtemp()
+    had_np = "numpy" in sys.modules
+    old_np = sys.modules.get("numpy")
+    if old_np is None:
+        sys.modules["numpy"] = type(sys)("numpy")  # nur fuer den Test: Messprogramm gilt als vorhanden
+    try:
+        _selftest_dual(tempfile.mkdtemp())
+    finally:
+        if not had_np or old_np is None:
+            sys.modules.pop("numpy", None)
+            if had_np:
+                sys.modules["numpy"] = old_np
+
+
+def _selftest_dual(tmp):
     c = {"serial": "19348831", "stick2": {"serial": "72055505", "enabled": True}}
     assert cfg_serial2(c) == "72055505" and cfg_serial2({"serial": "1", "stick2": {"serial": "1", "enabled": True}}) is None
     assert cfg_serial2({"stick2": {"serial": "72055505", "enabled": False}}) is None
@@ -3609,7 +3623,7 @@ def selftest_dual():
         x.lage_user = None
     set_lage(tmp, profile="warn")
     m.set_role("bc"); w.set_role("rot")
-    now = time.time()
+    now = 1760000000.0  # feste Uhr
     m.last_bc = 0
     j1 = m.want({"mode": "auto"}, now)
     assert j1.startswith("rds:") and m.special["kind"] == "bc", j1
@@ -3617,6 +3631,22 @@ def selftest_dual():
     j2 = w.want({"mode": "auto"}, now)
     assert j2.startswith("nz:") and not w.bc_queue() and not m.noise_queue(), j2
     assert m.cfg["auto"] == [] and w.cfg["auto"] == ["433", "aprs"]
+    # Live-Lage nachgestellt (Warnlage angepasst): 433=AUTO act=AUS aprs=AUS asa=AN bc=AN cal=AUTO meteor=AUS noise=AN
+    for k, v in (("aprs", "aus"), ("act", "aus"), ("meteor", "aus"), ("433", "auto"), ("asa", "an"), ("bc", "an"), ("cal", "auto"), ("noise", "an")):
+        set_lage(tmp, src=k, state=v)
+    for x in (m, w):
+        x.special = None
+        x.lage_apply()
+    w.last_noise = 0
+    assert w.want({"mode": "auto"}, now).startswith("nz:")  # QRM faellig -> laeuft zuerst
+    w.special = None
+    w.last_noise = now
+    j3 = w.want({"mode": "auto"}, now + 1)
+    assert j3 == "433", j3  # QRM gerade gelaufen -> 433 fuellt
+    w.special = None
+    w.last_noise = now - float(w.cfg.get("noise_interval_s") or 900)
+    assert w.want({"mode": "auto"}, now + 1).startswith("nz:")  # Intervall abgelaufen -> wieder QRM
+    w.special = None
     s1 = dict((x["k"], x["pct"]) for x in m.lage_shares(now))
     s2 = dict((x["k"], x["pct"]) for x in w.lage_shares(now))
     assert "noise" not in s1 and s1.get("bc", 0) + s1.get("asa", 0) > 90 and "bc" not in s2 and s2["noise"] > 0 and s2["433"] > 0, (s1, s2)
@@ -3628,7 +3658,7 @@ def selftest_dual():
     m.special = w.special = None
     m.set_role("single"); w.set_role("single")
     m.lage_apply()
-    assert m.cfg["noise_enable"] and m.cfg["auto"] == ["433", "aprs"]
+    assert m.cfg["noise_enable"] and m.cfg["auto"] == ["433"]  # Live-Lage: APRS AUS
     w.cal_res = [0.0, -1110.32]
     w.dab_list = lambda: ["11D"]
     w.cal_finish(time.time())
@@ -4082,9 +4112,217 @@ def _sd_selftest():
     return True
 
 
+# --- sdrDual Anzeige: ASA DE (DAB 5C) eigene Zeile, BR24/NINA auf der Lage-Seite umbrechen statt abschneiden, leere Kaesten ausblenden (nur Anzeige) ---
+def _sd_asa_row(b, r, now=None):
+    """ASA DE als eigener Status: state gruen/rot/gelb/grau, l1 Status + Quelle, l2 'Empfangen dd.mm.yyyy HH:MM:SS'."""
+    now = now or _br24_time.time()
+    b = b if isinstance(b, dict) else {}
+    r = r if isinstance(r, dict) else {}
+    m = r.get("match") or {}
+    asa = m.get("asa") or {}
+    chans = sorted(asa) or ["5C"]
+    dab = b.get("dab") or {}
+    ts = [(dab.get(ch) or {}).get("t") for ch in chans]
+    ts = [t for t in ts if isinstance(t, (int, float))]
+    t = max(ts) if ts else None
+    src = "ASA DE · DAB %s" % "/".join(chans)
+    out = {"state": "grau", "t": int(t) if t else None, "l2": ("Empfangen %s" % _br24_fmt(t)) if t else "", "src": src}
+    hit = None
+    w = r.get("why")
+    if r.get("state") == "rot" and isinstance(w, dict) and str(w.get("src") or "").startswith("ASA DE"):
+        hit = ("rot", w)
+    else:
+        for x in r.get("recent") or []:
+            if str(x.get("src") or "").startswith("ASA DE") and x.get("cls") in ("rot", "test") and isinstance(x.get("t"), (int, float)) \
+                    and now - x["t"] < (BR24_HOLD_S if x.get("cls") == "rot" else BR24_TEST_S):
+                hit = (x["cls"], x)
+                break
+    if hit and hit[0] == "rot":
+        out.update(state="rot", l1="%s ⚠ %s: „%s“" % (src, hit[1].get("kind") or "Warnung", hit[1].get("text") or ""), l2="Empfangen %s" % (hit[1].get("t_txt") or _br24_fmt(hit[1].get("t"))))
+    elif hit:
+        out.update(state="grau", l1="%s · Probewarnung/Test: „%s“" % (src, hit[1].get("text") or ""), l2="Empfangen %s" % (hit[1].get("t_txt") or _br24_fmt(hit[1].get("t"))))
+    elif t and now - t < BR24_RX_S:
+        out.update(state="gruen" if asa else "gelb", l1=("%s · keine Warnung" % src) if asa else ("%s · Kanal empfangen, Dienst ASA DE nicht gefunden" % src))
+    elif t:
+        out.update(state="grau", l1="%s · kein Empfang seit %s" % (src, _br24_fmt(t)))
+    else:
+        out.update(state="grau", l1="%s · noch nicht empfangen" % src)
+    return out
+
+
+def _sd_hm(t, now):
+    if not t:
+        return "–"
+    lt, ln = _br24_time.localtime(int(t)), _br24_time.localtime(int(now))
+    return _br24_time.strftime("%H:%M" if lt[:3] == ln[:3] else "%d.%m. %H:%M", lt)
+
+
+def _sd_bc_plan(st, now):
+    """Rundfunk-Block = nacheinander UKW (RDS), DAB 11D (BR24), DAB 5C (ASA DE) auf EINEM Stick, nie gleichzeitig.
+    -> naechster Start je Pruefung (Schaetzung aus Planer-Status), laufende Pruefung."""
+    st = st if isinstance(st, dict) else {}
+    bc = next((x for x in st.get("sched") or [] if isinstance(x, dict) and x.get("k") == "bc"), None) or {}
+    dab = [str(x) for x in bc.get("dab") or []]
+    fm_n = int(bc.get("fm_n") or 0)
+    jobs = ["rds:%d" % i for i in range(fm_n)] + ["dab:%d" % i for i in range(len(dab))]
+    out = {"br24": None, "asa": None, "run": None, "iv": bc.get("iv"), "on": bool(bc.get("on", True)) and bool(jobs)}
+    if not jobs:
+        return out
+    each = float(bc.get("dur") or 60 * len(jobs)) / len(jobs)
+
+    def who(j):
+        return "asa" if j.startswith("dab:") and dab[int(j[4:])] == "5C" else "br24"
+    sp = st.get("special") or {}
+    seq = []
+    if sp.get("kind") == "bc" and sp.get("job") in jobs:
+        i = jobs.index(sp["job"])
+        out["run"] = who(sp["job"])
+        t = max(float(st.get("since") or now) + each, now)
+        for j in jobs[i + 1:]:
+            seq.append((j, t))
+            t += each
+        t += float(bc.get("iv") or 0)
+    else:
+        t = float(bc.get("next") or 0) or None
+    if t:
+        for j in jobs:
+            seq.append((j, t))
+            t += each
+    for j, t0 in seq:
+        k = who(j)
+        if out[k] is None and out["run"] != k:
+            out[k] = int(t0)
+    return out
+
+
+def _sd_split(t):
+    m = _br24_re.match(r"^(.*?) · ((?:zuletzt |seit )?\d\d\.\d\d\.\d{4} \d\d:\d\d(?::\d\d)?)(.*)$", (t or "").replace(" · ASA DE ok", ""))
+    return (m.group(1), (m.group(2) + m.group(3)).strip()) if m else ((t or "").replace(" · ASA DE ok", ""), "")
+
+
+_sd_orig_br24_state = _br24_state
+
+
+def _br24_state():
+    r = _sd_orig_br24_state()
+    now = _br24_time.time()
+    try:
+        r["asa_row"] = _sd_asa_row(_sdr_load("broadcast_state.json", {}) or {}, r)
+    except Exception as e:
+        r["asa_row"] = {"state": "grau", "l1": "ASA DE · Daten nicht lesbar (%s)" % str(e)[:60], "l2": "", "t": None}
+    try:
+        pl = _sd_bc_plan(_sdr_load("sdr_status.json", {}) or {}, now)
+    except Exception:
+        pl = {"br24": None, "asa": None, "run": None, "on": False}
+    l1, _ = _sd_split(r.get("text"))
+    if r.get("state") == "gruen":
+        l1 = "BR24 empfangen · " + (" + ".join(r.get("srcs") or []) or str(r.get("last_src") or ""))
+    elif r.get("state") == "grau" and not r.get("test"):
+        l1 = "BR24 · kein Empfang" if r.get("last_rx") else "BR24 · noch nicht empfangen"
+
+    def l2(last, k):
+        a = "zuletzt %s" % _sd_hm(last, now)
+        b = "prüft gerade" if pl.get("run") == k else ("nächste Prüfung %s" % _sd_hm(pl.get(k), now) if pl.get(k) else "nächste Prüfung –")
+        return a + " · " + b
+    r["br24_row"] = {"state": r.get("state") or "grau", "l1": l1, "l2": l2(r.get("last_rx"), "br24")}
+    a = r["asa_row"]
+    a["l2"] = l2(a.get("t"), "asa")
+    r["bc_plan"] = pl
+    r["bc_note"] = "Stick 1 prüft abwechselnd BR24 (UKW + DAB 11D) und ASA DE (DAB 5C), nicht gleichzeitig"
+    return r
+
+
+_sd_orig_data2 = _sdrui_data
+
+
+def _sdrui_data():
+    d = _sd_orig_data2()
+    try:
+        a = _br24_state().get("asa_row") or {}
+        now = int(_br24_time.time())
+        for f in d.get("funcs") or []:
+            if f.get("k") == "asa" and a.get("l1"):
+                f["info"] = a["l1"].replace("ASA DE · ", "", 1)
+                if a.get("t"):
+                    f["last"] = a["t"]
+                    f["age"] = _sdrui_age(now, a["t"])
+                if f.get("lvl") != "aus":
+                    f["lvl"] = {"gruen": "ok", "rot": "rot", "gelb": "gelb"}.get(a.get("state"), "gelb")
+                f["tip"] = (a["l1"] + ("\n" + a["l2"] if a.get("l2") else "") + ("\n" + f["tip"] if f.get("tip") else ""))[:400]
+    except Exception:
+        pass
+    return d
+
+
+_SD_LAGE_JS = r"""
+(function(){var C={gruen:'#22c55e',rot:'#ef4444',gelb:'#eab308',grau:'#64748b'},A=null;
+function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!==undefined)e.textContent=x;return e;}
+if(!document.getElementById('sdl-css')){var s=el('style');s.id='sdl-css';s.textContent='#br24Tile.sdl-on .lm1-line{display:none !important}.sdl-row{display:flex;align-items:flex-start;gap:8px;margin-top:6px;min-width:0}.sdl-dot{flex:0 0 auto;width:10px;height:10px;border-radius:50%;margin-top:.35em}.sdl-tx{flex:1 1 auto;min-width:0;white-space:normal;overflow-wrap:anywhere}.sdl-l1{font-weight:600}.sdl-row.rot .sdl-l1{color:#ef4444}.sdl-row.grau .sdl-l1{color:#94a3b8}.sdl-l2{font-size:.85em;opacity:.8;margin-top:1px}.sdl-note{margin-top:4px;opacity:.75;white-space:normal;overflow-wrap:anywhere}.sdl-wrap div,.sdl-wrap span{white-space:normal !important;overflow:visible !important;text-overflow:clip !important;overflow-wrap:anywhere}';document.head.appendChild(s);}
+function split(t){t=(t||'').replace(/ · ASA DE ok$/,'');var m=t.match(/^(.*?) · ((?:zuletzt |seit )?\d\d\.\d\d\.\d{4},? \d\d:\d\d(?::\d\d)?)(.*)$/);return m?[m[1],m[2]+m[3]]:[t,''];}
+function row(cls,st,l1,l2){var r=el('div','sdl-row '+cls+' '+st);var d=el('span','sdl-dot');d.style.background=C[st]||C.grau;r.appendChild(d);var x=el('div','sdl-tx');x.appendChild(el('div','sdl-l1',l1));if(l2)x.appendChild(el('div','sdl-l2',l2));r.appendChild(x);return r;}
+function nina(){var ts=document.querySelectorAll('.title');for(var i=0;i<ts.length;i++){if(/\bNINA\b/i.test(ts[i].textContent||'')){var c=ts[i].closest('.card');if(c&&c.id!=='br24Tile')return c;}}return null;}
+function empty(e){if(e.tagName!=='DIV'||e.id==='br24Tile'||e.querySelector('script,style,img,svg,canvas,input,select,button,iframe,video,textarea'))return false;return !(e.textContent||'').trim();}
+function fix(){var t=document.getElementById('br24Tile');var n=nina();if(n)n.classList.add('sdl-wrap');if(!t)return;
+var ln=t.querySelector('.lm1-line');if(ln){var raw=ln.textContent||'';var st=/239, 68, 68|#ef4444/.test(ln.getAttribute('style')||'')?'rot':(/\bonline\b/.test(ln.className)?'gruen':'grau');var key=raw+'|'+st+'|'+JSON.stringify(A||{});
+if(t.dataset.sdl!==key){t.dataset.sdl=key;var o=t.querySelectorAll('.sdl-row');for(var i=0;i<o.length;i++)o[i].remove();var R=(A&&A.br)||null;var p=R?[R.l1,R.l2]:split(raw);if(R&&R.state)st=R.state;var b=row('sdl-br',st,p[0]||'BR24',p[1]);ln.parentNode.insertBefore(b,ln.nextSibling);
+var Q=A&&A.asa;if(Q&&Q.l1){b.parentNode.insertBefore(row('sdl-asa',Q.state||'grau',Q.l1,Q.l2||''),b.nextSibling);}if(A&&A.note){var nt=t.querySelector('.sdl-note');if(!nt){nt=el('div','small sdl-note');t.insertBefore(nt,b);}nt.textContent=A.note;}t.classList.add('sdl-on');}}
+var c=t.parentNode;if(c){for(var j=0;j<c.children.length;j++){var e=c.children[j];if(e===n)continue;if(empty(e)){if(e.style.display!=='none'){e.style.display='none';e.dataset.sdlHid='1';}}else if(e.dataset.sdlHid){e.style.display='';delete e.dataset.sdlHid;}}}}
+function load(){fetch('/api/br24',{credentials:'same-origin'}).then(function(x){return x.json();}).then(function(j){if(j&&j.asa_row){A={asa:j.asa_row,br:j.br24_row,note:j.bc_note};t0();fix();}}).catch(function(){});}
+function t0(){var t=document.getElementById('br24Tile');if(t)t.dataset.sdl='';}
+fix();load();setInterval(fix,1000);setInterval(load,30000);})();
+"""
+
+_SD_RF_JS = r"""
+(function(){var P=location.pathname.replace(/\/$/,'')||'/';if(P!=='/rundfunk')return;var A=null,B=null;
+function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!==undefined)e.textContent=x;return e;}
+if(!document.getElementById('sdr-css2')){var s=el('style');s.id='sdr-css2';s.textContent='#br24Row,#br24Asa{white-space:normal !important;align-items:flex-start !important}#br24Row .br24-tx,#br24Asa .br24-tx{white-space:normal !important;overflow:visible !important;text-overflow:clip !important;overflow-wrap:anywhere}#br24Row .br24-dot,#br24Asa .br24-dot{margin-top:.3em}#br24Row .br24-l2,#br24Asa .br24-l2{display:block;font-size:.85em;opacity:.85}';document.head.appendChild(s);}
+function put(){var r=document.getElementById('br24Row');if(!r||!A||!A.l1)return;var tx=r.querySelector('.br24-tx');if(tx&&B&&B.l1&&!tx.querySelector('.br24-l2')){tx.textContent=B.l1;tx.appendChild(el('span','br24-l2',B.l2||''));}
+var a=document.getElementById('br24Asa');var cls='br24-row br24-'+(A.state==='gruen'?'gruen':(A.state==='rot'?'rot':'grau'));var key=A.l1+'|'+A.l2+'|'+cls;
+if(!a){a=el('div');a.id='br24Asa';a.setAttribute('role','status');}if(r.nextSibling!==a)r.parentNode.insertBefore(a,r.nextSibling);
+if(a.dataset.v!==key){a.dataset.v=key;a.className=cls;a.textContent='';a.appendChild(el('span','br24-dot'));var x=el('span','br24-tx',A.l1);if(A.l2)x.appendChild(el('span','br24-l2',A.l2));a.appendChild(x);}}
+function load(){fetch('/api/br24',{credentials:'same-origin'}).then(function(x){return x.json();}).then(function(j){if(j&&j.asa_row){A=j.asa_row;B=j.br24_row;var r=document.getElementById('br24Row');if(r)r.dataset.v='';put();}}).catch(function(){});}
+try{var d=JSON.parse(document.getElementById('br24-data').textContent);A=d&&d.asa_row;B=d&&d.br24_row;}catch(e){}
+put();load();setInterval(put,2000);setInterval(load,30000);})();
+"""
+
+if "sdl-css" not in _LM1_JS:
+    _LM1_JS = _LM1_JS + _SD_LAGE_JS
+if "sdr-css2" not in _BR24_JS:
+    _BR24_JS = _BR24_JS + _SD_RF_JS
+_SD_JS = _SD_JS.replace("</style>", "#sdrUiCard .su-chip[data-k=asa] .su-l2{white-space:normal;overflow-wrap:anywhere;text-overflow:clip}</style>", 1)
+
+
+def _sd_asa_selftest():
+    now = 1760000000
+    b = {"dab": {"5C": {"t": now - 60}}}
+    r = {"state": "gruen", "match": {"asa": {"5C": {"ASA DE": []}}}, "recent": []}
+    a = _sd_asa_row(b, r, now)
+    assert a["state"] == "gruen" and a["l1"] == "ASA DE · DAB 5C · keine Warnung" and a["l2"].startswith("Empfangen "), a
+    assert _sd_asa_row({}, {"match": {}}, now)["l1"] == "ASA DE · DAB 5C · noch nicht empfangen"
+    assert _sd_asa_row(b, {"match": {}}, now)["state"] == "gelb"
+    w = {"t": now - 100, "src": "ASA DE 5C", "kind": "DLS", "text": "Gefahr", "cls": "rot", "t_txt": "x"}
+    assert _sd_asa_row(b, dict(r, state="rot", why=w), now)["state"] == "rot"
+    assert _sd_asa_row(b, dict(r, recent=[w]), now)["state"] == "rot"
+    assert _sd_asa_row({"dab": {"5C": {"t": now - 99999}}}, r, now)["l1"].startswith("ASA DE · DAB 5C · kein Empfang seit")
+    st = {"special": {"kind": "bc", "job": "rds:0"}, "since": now - 10, "sched": [{"k": "bc", "on": True, "iv": 5, "dur": 180, "dab": ["11D", "5C"], "fm_n": 1, "next": now + 500}]}
+    pl = _sd_bc_plan(st, now)
+    assert pl["run"] == "br24" and pl["br24"] is None and pl["asa"] == now + 110, pl
+    st["special"] = {"kind": "bc", "job": "dab:1"}
+    pl = _sd_bc_plan(st, now)
+    assert pl["run"] == "asa" and pl["br24"] == now + 55 and pl["asa"] is None, pl
+    st["special"] = {}
+    pl = _sd_bc_plan(st, now)
+    assert pl["run"] is None and pl["br24"] == now + 500 and pl["asa"] == now + 620, pl
+    assert _sd_split("BR24 empfangen · DAB 11D · zuletzt 13.10.2026 12:50:00 · ASA DE ok") == ("BR24 empfangen · DAB 11D", "zuletzt 13.10.2026 12:50:00")
+    for js in (_SD_LAGE_JS, _SD_RF_JS):
+        assert "POST" not in js and "method" not in js and js.count("fetch(") == js.count("fetch('/api/br24',") == 1 and "</script" not in js
+    return True
+
+
 try:
     _sd_selftest()
-    print("sdrDual aktiv: zwei Balken je Stick, Krisenzeile je Stick", flush=True)
+    _sd_asa_selftest()
+    print("sdrDual aktiv: zwei Balken je Stick, Krisenzeile je Stick, ASA DE eigene Zeile, Lage-Kacheln umbrechen", flush=True)
 except Exception as _sd_e:
     print("sdrDual FEHLER:", _sd_e, flush=True)
 # ===== /sdrDual =====
@@ -4142,6 +4380,12 @@ if "add_url_rule" in blk or "after_request" in blk: err.append("Block: neue Rout
 js = blk[blk.index("_SD_JS = r"):blk.index("def _sd_selftest")]
 for w in ("fetch(", "XMLHttpRequest", "WebSocket", "sendBeacon", "localStorage", "eval(", "POST"):
     if w in js: err.append("JS enthaelt " + w)
+for nm in ("_SD_LAGE_JS = r", "_SD_RF_JS = r"):
+    j2 = blk[blk.index(nm):]
+    j2 = j2[:j2.index('"""', len(nm) + 3)]
+    for w in ("XMLHttpRequest", "WebSocket", "sendBeacon", "localStorage", "eval(", "POST", "method", "</script"):
+        if w in j2: err.append("JS %s enthaelt %s" % (nm[:10], w))
+    if j2.count("fetch(") != j2.count("fetch('/api/br24',") or j2.count("fetch(") != 1: err.append("JS %s: fetch nur GET /api/br24 erlaubt" % nm[:10])
 if "mesh" in blk.lower(): err.append("Mesh im Block")
 for nm in ("set_lage", "get_lage", "lage_apply", "stick_health"):
     if nm not in nc: pass
@@ -4156,7 +4400,10 @@ python3 "$P" "$W/work/dashboard.py" "$W/work/d2.py" "$LB" >/dev/null && cmp -s "
 "$VPY" -W error -m py_compile "$W/work/dashboard.py" || { echo "STOP: py_compile dashboard - nichts geaendert"; exit 1; }
 cp -a "$DASH_DIR/prepper_gps.py" "$DASH_DIR/prepper_evlog.py" "$DASH_DIR/prepper_sdr_net.py" "$W/" 2>/dev/null || true
 ( cd "$W" && "$VPY" -W error "$M" selftest > "$W/selftest.txt" 2>&1 ) || { tail -5 "$W/selftest.txt"; echo "STOP: Selbsttest prepper_sdr - nichts geaendert"; exit 1; }
-echo "OK Trockenlauf idempotent, py_compile ohne Warnung, Selbsttest prepper_sdr ok"
+SPY=/usr/bin/python3; [[ -x "$SPY" ]] || SPY=python3
+( cd "$W" && "$SPY" -W error "$M" selftest > "$W/selftest2.txt" 2>&1 ) || { tail -5 "$W/selftest2.txt"; echo "STOP: Selbsttest prepper_sdr (Dienst-Python) - nichts geaendert"; exit 1; }
+"$SPY" -c "import numpy" 2>/dev/null && echo "OK Dienst-Python hat numpy (QRM-Messung moeglich)" || echo "WARNUNG: Dienst-Python ohne numpy - QRM-Messung faellt aus, Stick 2 macht nur 433"
+echo "OK Trockenlauf idempotent, py_compile ohne Warnung, Selbsttest prepper_sdr ok (hermetisch, Dashboard- und Dienst-Python)"
 code() { local c; c=$("${CURL[@]}" "$@" -o /dev/null -w "%{http_code}" || true); [[ -z "$c" ]] && c=000; echo "$c"; }
 code_r() { local c i; for i in 1 2 3 4 5; do c=$(code "$@"); [[ "$c" == 200 ]] && break; sleep 6; done; echo "$c"; }
 PAGES=(/ /funk /pi /umwelt /funk433 /aprs /meteor /rundfunk /energie)
@@ -4308,6 +4555,8 @@ import json,sys,time
 d=json.load(sys.stdin)
 lr=d.get('last_rx')
 print('BR24-Empfang: %s · zuletzt %s%s · %s' % (d.get('state'), time.strftime('%d.%m. %H:%M:%S', time.localtime(lr)) if lr else 'nie', (' (' + str(d.get('last_src')) + ')') if d.get('last_src') else '', str(d.get('text') or '')[:120]))
+a=d.get('asa_row') or {}
+print('ASA DE: %s · %s%s' % (a.get('state'), a.get('l1'), (' · ' + a['l2']) if a.get('l2') else ''))
 " 2>/dev/null || echo "WARN BR24-Status nicht lesbar"
 GL=""; for gm in sdrDual sdrLage sdrQrmFix sdrUi lageMesh1 br24Warn2 br24Warn evLog gpsLearn umweltWide sdrNoise2 sdrGps sdrNoise sdrRf sdrRds sdrStick sdrAct sdrPreset sdrPlus sdAck sdrFunk2 sdrFunk; do GL="$GL $gm=$(grep -c "# ===== $gm:" "$F" || true)"; done
 echo "OK guards$GL prepper_sdr.sdrQrmFix=$(grep -c '# ===== sdrQrmFix:' "$DASH_DIR/prepper_sdr.py" || true) prepper_sdr.sdrLage=$(grep -c '# ===== sdrLage:' "$DASH_DIR/prepper_sdr.py" || true) prepper_sdr.sdrDual=$(grep -c '# ===== sdrDual:' "$DASH_DIR/prepper_sdr.py" || true)"
