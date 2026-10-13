@@ -25,8 +25,8 @@ CURL=(curl --compressed -s --connect-timeout 3 --max-time 40)
 echo "=== sdrDual apply, Dashboard-Port $PORT ==="
 NEW_MOD16="78b9106899d1fbbd"
 EXPECT_MOD="78b9106899d1fbbd93e045c44886da22073a6d4b47b6561cbec6f6459704af72"
-EXPECT_PATCH="5f46db7e0f5eac6f1a4176bfc1a27e94fdfef92cd6917c468145297db6a93798"
-EXPECT_BLK="fc2b43fc754c6317610eb920530ba8072f628fb51dac5a26ec4e196ff08d19dd"
+EXPECT_PATCH="af8523bc8b98c3c70796668b6dc3ba4662ab4e8d64ced322ed9e6f488cc9dd1c"
+EXPECT_BLK="5a2f77c7884a18c9a8376c67c806418878ee77b75653f201598639f348f586a1"
 rm -rf "$W" && mkdir -p "$W"
 cat > "$W/prepper_sdr.py" << 'MODPY_EOF'
 #!/usr/bin/env python3
@@ -4025,7 +4025,8 @@ blk = open(blkf, encoding="utf-8").read()
 if "# ===== sdrDual:" in s:
     open(dst, "w", encoding="utf-8").write(s); print("schon da"); raise SystemExit(0)
 R = [("resp.set_data(body[:i] + _SL_CSS + _SL_JS + body[i:])", "resp.set_data(body[:i] + _SL_CSS + _SL_JS + globals().get(\"_SD_JS\", \"\") + body[i:])"),
-     ("# ===== /sdrLage =====\n", "# ===== /sdrLage =====\n" + blk)]
+     ("# ===== /sdrLage =====\n", "# ===== /sdrLage =====\n" + blk),
+     ('        print("sdrUi inject:", e, flush=True)\n', '        print("sdrUi inject:", e, flush=True)\n        import traceback as _sdui_tb  # sdrDual: voller Traceback ins Log\n        _sdui_tb.print_exc()\n')]
 for a, b in R:
     if s.count(a) != 1:
         print("Basis passt nicht:", a[:50], s.count(a)); raise SystemExit(3)
@@ -4308,6 +4309,7 @@ _SD_DICT = ("dual", "s2", "stick_health", "stick_health2", "cal", "gps", "noise"
 _SD_LIST = ("shares", "shares2", "sched", "auto", "others", "stderr", "home")
 _SD_NONE_OK = ("special", "next_pass", "evlog")
 _SD_NOSTAT = [False]
+import traceback as _sd_tb
 
 
 def _sd_clean(st):
@@ -4366,6 +4368,7 @@ def _sdrui_data():
         return _sd_orig_data3()
     except Exception as e:
         print("sdrDual: SDR-Daten nicht verfuegbar (%s) - Anzeige ohne Status" % str(e)[:120], flush=True)
+        _sd_tb.print_exc()
         _SD_NOSTAT[0] = True
         try:
             d = _sd_orig_data3()
@@ -4454,13 +4457,13 @@ def info(fn):
     return imp, calls, bad
 bi, bc, bb = info(sys.argv[1]); ni, nc, nb = info(sys.argv[2]); pi, pc, pb = info(sys.argv[3])
 err = []
-if ni != bi: err.append("Importe geaendert %s" % (ni ^ bi))
+if (ni - {"traceback"}) != (bi - {"traceback"}): err.append("Importe geaendert %s" % (ni ^ bi))
 if sorted(nb) != sorted(bb): err.append("neue verbotene Elemente %s" % (set(nb) - set(bb)))
 for nm in ("Popen", "socket", "system", "run", "call", "check_output"):
     if nc.count(nm) > bc.count(nm): err.append("mehr %s-Aufrufe" % nm)
 if pi - {"sys"} or pb: err.append("patch-dual.py: %s %s" % (pi, pb))
 li, lc, lb = info(sys.argv[4])
-if li: err.append("Block-Importe %s" % li)
+if li - {"traceback"}: err.append("Block-Importe %s" % li)
 if [x for x in lb if not x.startswith("str:")]: err.append("Block verboten %s" % lb)
 for nm in ("Popen", "system", "run", "call", "send_meshtastic", "open", "urlopen", "remove", "unlink", "Thread"):
     if nm in lc: err.append("Block ruft %s" % nm)
