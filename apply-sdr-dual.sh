@@ -25,7 +25,7 @@ CURL=(curl --compressed -s --connect-timeout 3 --max-time 40)
 echo "=== sdrDual apply, Dashboard-Port $PORT ==="
 NEW_MOD16="78b9106899d1fbbd"
 EXPECT_MOD="78b9106899d1fbbd93e045c44886da22073a6d4b47b6561cbec6f6459704af72"
-EXPECT_PATCH="af8523bc8b98c3c70796668b6dc3ba4662ab4e8d64ced322ed9e6f488cc9dd1c"
+EXPECT_PATCH="329b544b7908598d337dff4ba37a598d6cc006b7bb7fe01736564d325ac956c6"
 EXPECT_BLK="5a2f77c7884a18c9a8376c67c806418878ee77b75653f201598639f348f586a1"
 rm -rf "$W" && mkdir -p "$W"
 cat > "$W/prepper_sdr.py" << 'MODPY_EOF'
@@ -4025,6 +4025,7 @@ blk = open(blkf, encoding="utf-8").read()
 if "# ===== sdrDual:" in s:
     open(dst, "w", encoding="utf-8").write(s); print("schon da"); raise SystemExit(0)
 R = [("resp.set_data(body[:i] + _SL_CSS + _SL_JS + body[i:])", "resp.set_data(body[:i] + _SL_CSS + _SL_JS + globals().get(\"_SD_JS\", \"\") + body[i:])"),
+     ('str(a.get("label") or a.get("name") or a) for a in asa if a)', 'str((a.get("label") or a.get("name") or a) if isinstance(a, dict) else a) for a in asa if a)'),
      ("# ===== /sdrLage =====\n", "# ===== /sdrLage =====\n" + blk),
      ('        print("sdrUi inject:", e, flush=True)\n', '        print("sdrUi inject:", e, flush=True)\n        import traceback as _sdui_tb  # sdrDual: voller Traceback ins Log\n        _sdui_tb.print_exc()\n')]
 for a, b in R:
@@ -4502,6 +4503,7 @@ code_r() { local c i; for i in 1 2 3 4 5; do c=$(code "$@"); [[ "$c" == 200 ]] &
 PAGES=(/ /funk /pi /umwelt /funk433 /aprs /meteor /rundfunk /energie)
 declare -A PRE
 for p in "${PAGES[@]}"; do PRE[$p]=$(code -L --max-redirs 5 "$B$p"); done
+echo "vorher HTTP /api/sdr/ui=$(code "$B/api/sdr/ui")"
 echo "vorher HTTP: $(for p in "${PAGES[@]}"; do printf '%s=%s ' "$p" "${PRE[$p]}"; done)"
 [[ "${PRE[/funk]}" == 200 ]] || { echo "STOP: /funk antwortet nicht - nichts geaendert"; exit 1; }
 "${CURL[@]}" -L --max-redirs 5 "$B/pi" -o "$W/pi0.html" || true
@@ -4616,6 +4618,7 @@ MODE1=$(md5sum "$DASH_DIR/sdr_mode.json" 2>/dev/null | cut -c1-32 || echo none)
 fail=0
 for p in "${PAGES[@]}"; do c=$(code_r -L --max-redirs 5 "$B$p"); [[ "$c" != "${PRE[$p]}" && "$c" != 200 ]] && fail=1; printf '  HTTP %s = %s (vorher %s)\n' "$p" "$c" "${PRE[$p]}"; done
 [[ "$fail" == 0 ]] || rbx "Seite antwortet schlechter als vorher"
+for p in /api/sdr/ui /api/br24; do c=$(code_r "$B$p"); printf '  HTTP %s = %s\n' "$p" "$c"; [[ "$c" == 200 ]] || rbx "$p antwortet $c"; done
 # ---------- 6) erster echter QRM-Block ----------
 if [[ "$RESTARTED" == 1 ]]; then
   NW=$(python3 -c "import json,sys; c=json.load(open(sys.argv[1])); print(int(float(c.get('noise_warmup_s') or 300)) + 420)" "$DASH_DIR/sdr_config.json" 2>/dev/null || echo 720)
