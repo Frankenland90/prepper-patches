@@ -23,17 +23,9 @@ done
 PY=/usr/bin/python3
 [[ -x "$PY" ]] || PY=$(command -v python3)
 [[ -n "$PY" ]] || { echo "STOP: python3 fehlt"; exit 1; }
-if [[ "$MODE" == "frage" ]]; then
-  "$PY" - "$DASH_DIR" probe || exit 1
-  if [[ -r /dev/tty ]]; then
-    read -r -p "Download jetzt starten? [j/N] " ans < /dev/tty || ans=""
-  else
-    ans=""
-  fi
-  [[ "$ans" == "j" || "$ans" == "J" || "$ans" == "ja" ]] || { echo "Nichts geladen. (Ohne Rueckfrage: --ja)"; exit 0; }
-  MODE="ja"
-fi
-"$PY" - "$DASH_DIR" "$MODE" << 'PY'
+TPY=$(mktemp /tmp/prepper-tiles-XXXXXX.py) || { echo "STOP: mktemp fehlgeschlagen"; exit 1; }
+trap 'rm -f "$TPY"' EXIT
+cat > "$TPY" << 'PYEOF'
 import sys, os, math, time, json, datetime, shutil, signal, urllib.request, urllib.error
 
 DASH, MODE = sys.argv[1], sys.argv[2]
@@ -196,7 +188,18 @@ if stop["v"]:
 if fail:
     print("WARN: %d Kacheln fehlen noch - Skript einfach erneut starten" % fail); sys.exit(1)
 print("OK: Offline-Kacheln vollstaendig. Karte: http://<Pi>:5000/karte (Seite neu laden)")
-PY
+PYEOF
+if [[ "$MODE" == "frage" ]]; then
+  "$PY" "$TPY" "$DASH_DIR" probe || exit 1
+  if [[ -r /dev/tty ]]; then
+    read -r -p "Download jetzt starten? [j/N] " ans < /dev/tty || ans=""
+  else
+    ans=""
+  fi
+  [[ "$ans" == "j" || "$ans" == "J" || "$ans" == "ja" ]] || { echo "Nichts geladen. (Ohne Rueckfrage: --ja)"; exit 0; }
+  MODE="ja"
+fi
+"$PY" "$TPY" "$DASH_DIR" "$MODE" < /dev/null
 rc=$?
 if [[ $(id -u) -eq 0 && -d "$DASH_DIR/static/tiles" ]] && id "$OWNER" > /dev/null 2>&1; then
   chown -R "$OWNER:$OWNER" "$DASH_DIR/static/tiles"
