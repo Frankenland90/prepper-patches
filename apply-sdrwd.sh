@@ -23,7 +23,7 @@ LZ="$DASH_DIR/lagezentrum.db"
 VPY="$DASH_DIR/venv/bin/python"
 SPY=/usr/bin/python3
 HDST="/usr/local/sbin/prepper-sdr-wdhelper"
-SDST="/etc/sudoers.d/prepper-sdr-wd"
+SDST="/etc/sudoers.d/zz-prepper-sdr-wd"   # zz-: sortiert zuletzt, keine spaetere Datei ueberdeckt die Regel
 TS=$(date +%Y%m%d-%H%M%S)
 W=/tmp/sdrwd-apply
 KEEP_LAST=3
@@ -2446,6 +2446,35 @@ SU=$(systemctl show -p User --value prepper-sdr 2>/dev/null || true); [[ -z "$SU
 if ! [[ "$SU" =~ ^[a-z_][a-z0-9_-]*$ ]]; then echo "STOP: Benutzer von prepper-sdr unklar ($SU) - nichts geaendert"; exit 1; fi
 RULE="$SU ALL=(root) NOPASSWD: $HDST check, $HDST usb-reset [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9], $HDST reboot"
 if [[ "$SU" == root ]]; then echo "prepper-sdr laeuft als root: Hilfsprogramm direkt, keine sudoers-Regel noetig"; else echo "prepper-sdr laeuft als $SU: Hilfsprogramm ueber sudo -n, sudoers-Regel genau dafuer"; fi
+# sdrWd-sudo: echter Test wie im Dienst - als $SU, ohne Terminal (setsid, stdin /dev/null), ohne zwischengespeichertes Passwort
+asu() { if [[ "$(id -un)" == "$SU" ]]; then setsid -w "$@" < /dev/null; else sudo -n -u "$SU" setsid -w "$@" < /dev/null; fi; }
+WD_SUDO_ERR=""; WD_SUDO_OK=""
+wd_sudo_verify() {
+  local c out rc
+  for c in "check" "usb-reset 19348831" "reboot"; do
+    rc=0; if [[ "$(id -un)" == "$SU" ]]; then sudo -n -l "$HDST" $c > "$W/sl.log" 2>&1 || rc=$?; else sudo -n -l -U "$SU" "$HDST" $c > "$W/sl.log" 2>&1 || rc=$?; fi
+    [[ "$rc" == 0 ]] || { WD_SUDO_ERR="sudo -l: $HDST $c fuer $SU nicht erlaubt (rc $rc: $(head -c 200 "$W/sl.log" | tr '\n' ' '))"; return 1; }
+  done
+  rc=0; out=$(asu sudo -n "$HDST" check 2>&1) || rc=$?
+  [[ "$rc" == 0 && "$out" == *"bereit (uid 0)"* ]] || { WD_SUDO_ERR="$SU kann $HDST check nicht ohne Passwort und ohne Terminal ausfuehren (rc $rc: $(echo "$out" | head -2 | tr '\n' ' ' | cut -c1-200))"; return 1; }
+  rc=0; asu sudo -n true > /dev/null 2>&1 || rc=$?
+  if [[ "$rc" == 0 ]]; then
+    WD_SUDO_OK="$HDST check | usb-reset <8 Ziffern> | reboot ohne Passwort, Aufruf ohne Terminal wie im Dienst geprueft (Hinweis: $SU hat schon allgemeines sudo ohne Passwort - Gegenprobe entfaellt)"; return 0
+  fi
+  for c in "selftest" "usb-reset 1234" "usb-reset 19348831 x" "usb-reset ../x"; do
+    rc=0; out=$(asu sudo -n "$HDST" $c 2>&1) || rc=$?
+    [[ "$rc" != 0 && "$out" == sudo:* ]] || { WD_SUDO_ERR="sudo erlaubt zu viel ohne Passwort: $HDST $c (rc $rc)"; return 1; }
+  done
+  WD_SUDO_OK="nur $HDST check | usb-reset <8 Ziffern> | reboot ohne Passwort, Aufruf ohne Terminal wie im Dienst geprueft, andere Aufrufe verlangen Passwort"
+}
+wd_sudo_diag() {
+  echo "DIAG $(sudo -V 2>/dev/null | head -1); Skript als $(id -un), Dienst als $SU (Gruppen $(id -nG "$SU" 2>/dev/null | tr ' ' ','))"
+  echo "DIAG Hilfsprogramm: $(ls -l "$HDST" 2>&1 | cut -c1-160)"
+  echo "DIAG /etc/sudoers.d: $(sudo -n ls -1 /etc/sudoers.d 2>&1 | tr '\n' ' ' | cut -c1-400)"
+  echo "DIAG Defaults tty/pty/env: $(sudo -n grep -rhE '^[[:space:]]*Defaults.*(tty|pty|env_)' /etc/sudoers /etc/sudoers.d 2>/dev/null | tr -s ' \t' ' ' | tr '\n' ';' | cut -c1-400)"
+  echo "DIAG Regeln mit $SU oder Gruppe: $(sudo -n grep -rlE "^[[:space:]]*($SU|%)" /etc/sudoers /etc/sudoers.d 2>/dev/null | tr '\n' ' ' | cut -c1-300)"
+  sudo -n -l -U "$SU" 2>&1 | sed -n '/may run/,$p' | head -14 | cut -c1-200 | sed 's/^/DIAG sudo -l: /' || true
+}
 # ---------- 2) Trockenlauf ----------
 for k in "sdr prepper_sdr $BSD" "sm sdr_manager $BSM" "dash dashboard $BDA"; do set -- $k
   python3 "$PF" sdrWd "$1" "$W/work/$2.py" "$W/work/x.py" "$3" "$ED" >/dev/null && cmp -s "$W/work/$2.py" "$W/work/x.py" || { echo "STOP: $2 nicht idempotent - nichts geaendert"; exit 1; }
@@ -2522,7 +2551,7 @@ RESTARTED=0
 ALL=("$M" "$SMF" "$F")
 perm_ok() { [[ "$(stat -c '%U:%G %a' "$1" 2>/dev/null)" == "root:root $3" ]]; }
 H_SAME=0; cmp -s "$HL" "$HDST" 2>/dev/null && perm_ok "$HDST" x 755 && H_SAME=1
-S_SAME=1; if [[ "$SU" != root ]]; then S_SAME=0; sudo -n cmp -s "$W/sudoers" "$SDST" 2>/dev/null && S_SAME=1; fi
+S_SAME=1; if [[ "$SU" != root ]]; then sudo -v; S_SAME=0; sudo -n cmp -s "$W/sudoers" "$SDST" 2>/dev/null && S_SAME=1; fi
 if cmp -s "$W/work/prepper_sdr.py" "$M" && cmp -s "$W/work/sdr_manager.py" "$SMF" && cmp -s "$W/work/dashboard.py" "$F" && [[ "$H_SAME" == 1 && "$S_SAME" == 1 ]]; then
   echo "OK sdrWd schon installiert (3 Dateien, Hilfsprogramm, sudoers) - kein Neustart"
   T0=$(( $(date +%s) - 86400 ))
@@ -2569,16 +2598,16 @@ s=sqlite3.connect(sys.argv[1], timeout=30); d=sqlite3.connect(sys.argv[2]); s.ba
     perm_ok "$SDST" x 440 || { rb "sudoers-Regel Rechte $(stat -c '%U:%G %a' "$SDST" 2>/dev/null)"; exit 1; }
     echo "OK sudoers-Regel $SDST eingespielt (0440 root:root), visudo -c gueltig"
   fi
-  if [[ "$SU" != root ]]; then
-    for c in "check" "usb-reset 19348831" "reboot"; do sudo -n -l -U "$SU" "$HDST" $c > /dev/null 2>&1 || { rb "sudo erlaubt $HDST $c nicht"; exit 1; }; done
-    for c in "usb-reset 1234" "usb-reset 19348831 x" "selftest" "usb-reset ../x"; do sudo -n -l -U "$SU" "$HDST" $c > /dev/null 2>&1 && { rb "sudo erlaubt zu viel: $HDST $c"; exit 1; }; done
-    echo "OK sudo-Regel fuer $SU: nur $HDST check | usb-reset <8 Ziffern> | reboot (andere Aufrufe abgelehnt)"
-  fi
   if [[ "$H_SAME" != 1 ]]; then
     sudo install -o root -g root -m 0755 "$HL" "$HDST.new" && sudo mv -f "$HDST.new" "$HDST" || { rb "Hilfsprogramm installieren"; exit 1; }
     perm_ok "$HDST" x 755 && cmp -s "$HL" "$HDST" || { rb "Hilfsprogramm Rechte/Inhalt"; exit 1; }
     "$SPY" -I "$HDST" selftest > "$W/hlt.log" 2>&1 || { cat "$W/hlt.log"; rb "Hilfsprogramm Selbsttest"; exit 1; }
     echo "OK Hilfsprogramm eingespielt ($(s16 "$HDST")): $(tail -1 "$W/hlt.log" | cut -c1-140)"
+  fi
+  # sdrWd-sudo: Pruefung erst NACH dem Einspielen des Hilfsprogramms (sudo -l mit Befehl meldet sonst "command not found")
+  if [[ "$SU" != root ]]; then
+    wd_sudo_verify || { echo "FEHLER sudo-Pruefung: $WD_SUDO_ERR"; wd_sudo_diag; rb "sudo-Regel wirkt nicht wie erwartet ($WD_SUDO_ERR)"; exit 1; }
+    echo "OK sudo-Regel fuer $SU: $WD_SUDO_OK"
   fi
   for k in "prepper_sdr $M" "sdr_manager $SMF" "dashboard $F"; do set -- $k
     cp "$W/work/$1.py" "$2.new" && chmod --reference="$2.bak-sdrwd-$TS" "$2.new" && mv -f "$2.new" "$2" || { rb "installieren $1"; exit 1; }
