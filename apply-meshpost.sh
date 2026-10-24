@@ -28,7 +28,7 @@ KEEP_LAST=3
 KNOWN_D16="d383771a011d82cd"     # dashboard.py nach projDoc (Basis)
 KNOWN_D16N="f5b5cd5059b8ff0d"            # dashboard.py nach meshPost (Ziel)
 KNOWN_PD16O="f0d04208dd9b1d20"    # prepper_docs.py nach projDoc (Basis)
-KNOWN_PD16="3584d11bc2c365a3"            # prepper_docs.py nach meshPost (Ziel)
+KNOWN_PD16="8967b0166de7df9d"            # prepper_docs.py nach meshPost (Ziel)
 KNOWN_SDR16="f709b303d33a61c5"   # prepper_sdr.py (bleibt)
 KNOWN_SM16="002f6c5cad4bc1cb"    # sdr_manager.py (bleibt)
 KNOWN_CF16="476d8ad4b930c558"    # sdr_config.json (bleibt; nur Hinweis, weil andere Arbeitsschritte die Konfiguration anpassen koennen)
@@ -1090,7 +1090,7 @@ if __name__ == "__main__":
     except KeyError:
         print(__doc__); raise SystemExit(2)
 APC_EOF
-EXPECT_APD="3584d11bc2c365a3ff9c9244af14e8741bd6a464255b1b2cd2683f76121484b4"
+EXPECT_APD="8967b0166de7df9d0649955f8384280ddab5701947485d392a1571504446046c"
 cat > "$W/prepper_docs.py" << 'APD_EOF'
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
@@ -2188,12 +2188,14 @@ def now_berlin():
 
 
 def run(cmd, timeout=20):
-    try:
-        r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout, universal_newlines=True)
-        return r.returncode, r.stdout
-    except Exception as e:
-        note("%s: %s" % (" ".join(cmd[:3]), e))
-        return 99, ""
+    for versuch in (1, 2):                      # ein Fehlschlag (Timeout, Prozess nicht startbar) wird einmal wiederholt: ein kurzer Aussetzer darf die Beschreibung nicht veraendern
+        try:
+            r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout, universal_newlines=True)
+            return r.returncode, r.stdout
+        except Exception as e:
+            if versuch == 2:
+                note("%s: %s" % (" ".join(cmd[:3]), e))
+    return 99, ""
 
 
 def cell(x):
@@ -2498,7 +2500,8 @@ def collect_units():
                 u[k.lower()] = v.strip()
             elif k == "WatchdogUSec":
                 u["wd"] = v.strip()
-    return units
+    # nur installierte Units (Unit-Datei oder Fragment im Projektordner): transiente Units (z. B. von sudo/systemd-run) und "not-found"-Verweise kommen und gehen zwischen zwei Laeufen
+    return {nm: u for nm, u in units.items() if u.get("file") not in (None, "-") or u.get("fragmentpath")}
 
 
 def collect_timers():
@@ -2509,7 +2512,7 @@ def collect_timers():
             m = re.search(r"(\S+\.timer)\s+(\S+\.service)", ln)
             if m and UNIT_RE.search(m.group(1)):
                 rows.append((m.group(1), m.group(2)))
-    return rows
+    return sorted(set(rows))                    # list-timers sortiert nach der naechsten Ausloesung: die Reihenfolge wechselt im Betrieb, der Inhalt nicht
 
 
 def collect_external():
@@ -2965,9 +2968,12 @@ def validate(c, core_text):
     return "\n\n".join(nach), rep
 
 
+STABLE_DUMP = []      # (Name, Text) der Teile, die in den Stand-Hash eingehen (nur fuer --dump-stable, Diagnose)
+
+
 def assemble(c, ver, ts, with_nachtrag=True):
     """-> (Bloecke, Hash der stabilen Teile, Bericht, Nachtrag-Anzahl, Schwaerzungen)."""
-    parts_stable, parts_all = [], []
+    parts_stable, parts_all, named = [], [], []
 
     def sub(m):
         nm = m.group(1)
@@ -2979,6 +2985,7 @@ def assemble(c, ver, ts, with_nachtrag=True):
         parts_all.append(body)
         if nm not in VOLATILE and nm != "meta":
             parts_stable.append(body)
+            named.append((nm, body))
         return body
     core_only = re.sub(r"@@AUTO (\w+)@@", "", CORE)
     text = re.sub(r"@@AUTO (\w+)@@", sub, CORE)
@@ -2994,6 +3001,7 @@ def assemble(c, ver, ts, with_nachtrag=True):
                 out.append("%s (Fehler)" % nm)
         r = " ; ".join(out)
         parts_stable.append(r)
+        named.append(("FI", r))
         return r
     text = re.sub(r"@@FI ([^@]+)@@", fi, text)
     nach, rep = validate(c, core_only)
@@ -3006,6 +3014,7 @@ def assemble(c, ver, ts, with_nachtrag=True):
     text, funde = redact(text)
     B = parse(text)
     stable = hashlib.sha256((re.sub(r"@@AUTO \w+@@", "", CORE) + "\n".join(parts_stable) + nach).encode("utf-8")).hexdigest()
+    STABLE_DUMP[:] = named + [("Nachtrag", nach)]
     return B, stable, rep, nn, funde
 
 
@@ -3049,10 +3058,21 @@ def main(argv):
             keep = max(3, int(argv[argv.index("--keep") + 1]))
         except Exception:
             print("--keep braucht eine Zahl"); return 2
+    dump = None
+    if "--dump-stable" in argv:
+        try:
+            dump = argv[argv.index("--dump-stable") + 1]
+        except Exception:
+            print("--dump-stable braucht einen Dateinamen"); return 2
     ts = now_berlin()
     ver = ts.strftime("%Y%m%d-%H%M")
     c = build_ctx(live)
     B, stable, rep, nn, funde = assemble(c, ver, ts)
+    if dump:                                    # Diagnose: die in den Stand-Hash eingehenden Teile (geschwaerzt), damit zwei Laeufe verglichen werden koennen
+        try:
+            atomic_write(dump, redact("\n".join("##### %s\n%s" % (n, b) for n, b in STABLE_DUMP) + "\n")[0].encode("utf-8"))
+        except Exception as e:
+            print("--dump-stable: %s" % e)
     # Hash der stabilen Teile (ohne Version/Zeit) -> keine neue Version bei unveraendertem Stand
     marker = "Stand-Hash: " + stable[:16]
     last = None
@@ -3217,13 +3237,20 @@ echo "   (TFT-Anzeige, Homescreen-Kachel, Lesezeichen auf Handy/Browser und frem
 # Generator in der Sandbox: Kopie der Programmdateien (ohne config.py), Ausgabe nach $W/sbxdocs, kein Zugriff auf das laufende Dashboard (Port 1), nichts gesendet
 for x in "$DASH_DIR"/*.py; do [[ "$(basename "$x")" == config.py ]] && continue; cp "$x" "$W/sbx/"; done
 cp "$W/work/dashboard.py" "$W/sbx/dashboard.py"; cp "$RPD" "$W/sbx/prepper_docs.py"
-PRDOCS_BASE="$W/sbx" PRDOCS_OUT="$W/sbxdocs" PRDOCS_PORT=1 python3 "$W/sbx/prepper_docs.py" > "$W/gen0.log" 2>&1 || { tail -12 "$W/gen0.log"; echo "STOP: Generator in der Sandbox - nichts geaendert"; exit 1; }
+PRDOCS_BASE="$W/sbx" PRDOCS_OUT="$W/sbxdocs" PRDOCS_PORT=1 python3 "$W/sbx/prepper_docs.py" --dump-stable "$W/st1.txt" > "$W/gen0.log" 2>&1 || { tail -12 "$W/gen0.log"; echo "STOP: Generator in der Sandbox - nichts geaendert"; exit 1; }
 python3 "$PCK" docs "$W/sbxdocs" > "$W/gen1.log" 2>&1 || { cat "$W/gen1.log"; echo "STOP: Sandbox-Version der Projektbeschreibung fehlerhaft - nichts geaendert"; exit 1; }
 echo "OK Generator-Probelauf in der Sandbox: $(cat "$W/gen1.log")"
 SBT=$(ls -1 "$W/sbxdocs"/*.txt | tail -1)
 grep -q "X-Mesh-Post" "$SBT" && grep -q "/api/meshpost/status" "$SBT" && ! grep -q "alle sechs sind GET" "$SBT" && ! grep -q "loesen beim Aufruf eine Mesh-Sendung aus (force=True)\. Nie in Tests" "$SBT" || { echo "STOP: Sandbox-Version enthaelt noch den alten Stand (GET sendet) oder nicht den neuen (POST/X-Mesh-Post) - nichts geaendert"; exit 1; }
 echo "OK Sandbox-Version beschreibt den neuen Stand (Senden nur per POST, GET = Vorschau, /api/meshpost/status) und nicht mehr 'GET sendet'"
-PRDOCS_BASE="$W/sbx" PRDOCS_OUT="$W/sbxdocs" PRDOCS_PORT=1 python3 "$W/sbx/prepper_docs.py" 2>&1 | grep -q "UNVERAENDERT" && echo "OK Generator idempotent (zweiter Lauf: UNVERAENDERT, keine neue Version)" || { echo "STOP: Generator nicht idempotent - nichts geaendert"; exit 1; }
+PRDOCS_BASE="$W/sbx" PRDOCS_OUT="$W/sbxdocs" PRDOCS_PORT=1 python3 "$W/sbx/prepper_docs.py" --dump-stable "$W/st2.txt" > "$W/gen2.log" 2>&1 || true
+if grep -q "UNVERAENDERT" "$W/gen2.log"; then echo "OK Generator idempotent (zweiter Lauf: UNVERAENDERT, keine neue Version)"
+else
+  echo "Generator-Lauf 2 meldet nicht UNVERAENDERT. Unterschied der in den Stand-Hash eingehenden Teile (Lauf 1 -> Lauf 2, geschwaerzt, erste 40 Zeilen):"
+  diff -u "$W/st1.txt" "$W/st2.txt" 2>&1 | head -40 | cut -c1-220 | sed 's/^/   | /' || true
+  grep -E "^(OK Version|UNVERAENDERT|FEHLER)" "$W/gen2.log" | cut -c1-200 | sed 's/^/   | Lauf 2: /' || true
+  echo "STOP: Generator nicht idempotent - nichts geaendert"; exit 1
+fi
 code() { local c; c=$("${CURL[@]}" "$@" -o /dev/null -w "%{http_code}" || true); [[ -z "$c" ]] && c=000; echo "$c"; }
 code_r() { local c i; for i in 1 2 3 4 5; do c=$(code "$@"); [[ "$c" == 200 ]] && break; sleep 6; done; echo "$c"; }
 PAGES=(/ /funk /pi /umwelt /funk433 /aprs /meteor /rundfunk /energie /dabhist /mesh /karte)
