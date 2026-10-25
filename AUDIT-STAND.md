@@ -1,6 +1,6 @@
 # AUDIT-STAND – Prepper-Dashboard (BND-Prepper)
 
-Stand: Sonntag 25.10.2026, ca. 20:40 Uhr (Berlin). Keine Secrets in dieser Datei.
+Stand: Sonntag 25.10.2026, 20:45 Uhr (Berlin), aktualisiert nach Anwendung von commit34 und commit35. Keine Secrets in dieser Datei.
 Geschrieben vom Ausführungs-Agenten (Grok Bot) fuer Frank. Hintergrund: Frank t822u – Kontingent geht zu Ende, clockOff (commit35) ist bis naechsten Samstag die letzte Audit-Verbesserung.
 
 Host: BND-Prepper, Debian 13 aarch64, systemd 257, Python 3.13, Port 5000, Benutzer fmg, Projekt `/home/fmg/prepper-dashboard`, kein node auf der Pi.
@@ -13,8 +13,8 @@ Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PER
       cd /home/fmg/prepper-dashboard && sha256sum *.py tools/*.sh | cut -c1-16,65-
 
   (erste 16 Zeichen je Datei mit dem Soll vergleichen).
-- Bestaetigt angewendet auf der Pi (laut Frank/Eltern-Agent): bis einschliesslich commit32 (dashboard.py `ee4ea3123eb561c4`).
-- **Veroeffentlicht, Anwendung auf der Pi durch Frank noch offen / nicht bestaetigt: commit33 secXmlDash, commit34 wxSlot, commit35 clockOff.** Reihenfolge beim Anwenden: 33 -> 34 -> 35 (jeder Patch prueft die Basis per sha16 und stoppt sonst mit klarer Meldung).
+- Bestaetigt angewendet auf der Pi (Frank-Ausgaben, 25.10.2026): bis einschliesslich commit35 (dashboard.py `1831e7cd923396d1`, 25479 Zeilen; commit34 20:36, commit35 20:42, je alle Pruefungen OK).
+- Es gibt keine veroeffentlichten, aber nicht angewendeten Patches. Jeder Patch prueft die Basis per sha16 und stoppt sonst mit klarer Meldung.
 
 ## 2. Pi-Stand (sha16 = erste 16 Hex-Zeichen von sha256)
 
@@ -26,10 +26,10 @@ Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PER
 | commit30 relWatch | 874452e6491a74c5 |
 | commit31 dbVis | 3a933125227fb89b |
 | commit31b mapUi | 9cb49ceab0243cc4 |
-| commit32 modDead (MOD-08) | **ee4ea3123eb561c4** <- bestaetigter Pi-Stand |
+| commit32 modDead (MOD-08) | ee4ea3123eb561c4 |
 | commit33 secXmlDash | 1574109c8609cf26 |
 | commit34 wxSlot | 03ee294d6e4ed56f |
-| commit35 clockOff | **1831e7cd923396d1** <- Repo-Ziel (Branch kaeswasser-lage-monitor) |
+| commit35 clockOff | **1831e7cd923396d1** <- bestaetigter Pi-Stand (25.10. 20:42), gleich Branch kaeswasser-lage-monitor |
 
 ### weitere Dateien (Soll laut Apply-Skripten; auf der Pi gegenpruefen, nicht alle in dieser Sitzung erneut gelesen)
 
@@ -133,7 +133,7 @@ SEC-01 (nur Code-Seite erledigt, Rest bewusst offen), SEC-06, SEC-08.
 - Arbeitsordner auf der Box: `/workspace/<patchname>` (`wxslot`, `clockoff`, `bridges`, `relclock`, …) mit `mk/` (Edits, Block, Konfig, apply-*.sh), `src2/` (Pruefprogramm `guard_*.py`), `sim/` (Simulationen), `testout/`. Werkzeuge: `/workspace/lib/mk_apply_dash.py` (Apply-Generator), `/workspace/lib/run_sim_dash.sh`, `/workspace/lib/chain_dash.sh`. Fortschritt: `/workspace/rel01/PROGRESS.md`. Standard: `/workspace/audit-run/PATCH_STANDARD.md`.
 - Naechster Patch baut auf dashboard.py `1831e7cd923396d1` (nach commit35) auf; Basis-Hash im Generator-Config (`cfg_*.py`) anpassen.
 - Simulationen nur auf Port 5093, immer nur eine gleichzeitig, keine Screenshots.
-- Empfohlene Reihenfolge nach der Pause: (1) 33/34/35 anwenden und auf der Pi pruefen (Kachel "Zeit-Offset", Wetter-Slot-Nachholung im Journal); (2) kleine Fixes: Docs-Version (DOCS_TEXT.md), REL-10, async-Minifix, INT-3; (3) Aufraeumen (.bak, tote Zeilen, ~ip); (4) groessere Umbauten nur nach Freigabe.
+- Empfohlene Reihenfolge nach der Pause: (1) auf der Pi pruefen, ob der Wetter-Slot (Wetter, Pegel, Heartbeat alle 3 h) ohne Luecke kam und die Kachel "Zeit-Offset" stimmt (curl -s http://127.0.0.1:5000/api/sysboot/status, Journal grep wxSlot); (2) kleine Fixes: Docs-Version (DOCS_TEXT.md), REL-10, async-Minifix, INT-3; (3) Aufraeumen (.bak, tote Zeilen, ~ip); (4) groessere Umbauten nur nach Freigabe.
 - **Freigabe von Frank noetig vor:** PERF-01, MOD-05, MOD-06, MOD-07, PERF-03 (Rest), PERF-04.
 - Offene Beobachtung: fehlende Mesh-Meldungen werden vom anderen Worker untersucht (nicht Teil dieser Patches).
 
