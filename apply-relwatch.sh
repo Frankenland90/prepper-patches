@@ -9,6 +9,7 @@ set -eEuo pipefail
 #     Mit sudo, mit Rueckweg: bei jedem Fehler zuerst Drop-in zurueck (alte Datei oder entfernen), daemon-reload, dann dashboard.py zurueck, Neustart. Das Skript wartet nach dem Neustart WatchdogSec + 45 s (345 s) und bricht mit Rollback ab, wenn systemd das Dashboard in dieser Zeit neu startet (= Herzschlag kommt nicht an).
 #  Konservativ: Faeden-Wiederbelebung bewusst nicht (offene Entscheidung); nur Meldung. Basis streng (sha16): dashboard.py 565137da31dc675d (Stand nach alarmFaden commit29) oder relWatch schon drin; sonst STOP mit Werten. Andere Dateien werden nicht angefasst.
 #  Sicherung: dashboard.py.bak-relwatch-ZEIT und Drop-in-Sicherung (letzte 3). Keine Datenbank-Aenderung (daher keine SQLite-Sicherung). Keine neue Docs-Version (nur dashboard.py; Text fuer die naechste Docs-Version liegt beim Bericht).
+#  Stand 2 (Korrektur nach Abbruch auf der Pi): Nach daemon-reload wird die GELADENE Konfiguration geprueft (NeedDaemonReload=no, DropInPaths, wirksame Zeile WatchdogSec in systemctl cat, NotifyAccess, Restart); WatchdogUSec zeigt bei einem laufenden Dienst bis zum Neustart den alten Wert (systemd service.c: watchdog_original_usec wird nur in service_start gesetzt) und wird erst NACH dem Neustart auf 5min geprueft. Reihenfolge: Drop-in, daemon-reload, Konfig-Pruefung, Neustart, WatchdogUSec/Herzschlag/MainPID. Rollback nur bei echtem Fehlschlag.
 # Aufruf: bash /tmp/apply-relwatch.sh commit30 [dry-run]    (dry-run = alles pruefen und in der Sandbox testen, nichts installieren, kein sudo, kein Neustart)
 COMMIT_ARG="${1:-unbekannt}"
 MODE_ARG="${2:-}"
@@ -1195,7 +1196,9 @@ grep -qE '^ExecStart=.*dashboard\.py' "$W/unit.txt" || { cat "$W/unit.txt"; stop
 UTYPE=$(systemctl show -p Type --value "$UNITN" 2>/dev/null || true)
 [[ "$UTYPE" == simple || "$UTYPE" == exec || -z "$UTYPE" ]] || stop "Unit $UNITN hat Type=$UTYPE (erwartet simple oder exec)"
 WD0=$(systemctl show -p WatchdogUSec --value "$UNITN" 2>/dev/null || echo "?")
-if [[ ! -f "$DROPF" ]] && [[ "$WD0" != 0 && "$WD0" != "?" && "$WD0" != "infinity" && -n "$WD0" ]]; then stop "Unit $UNITN hat schon WatchdogSec ($WD0) aus anderer Quelle"; fi
+# WatchdogUSec zeigt bei laufendem Dienst den Wert vom letzten START (systemd: watchdog_original_usec), nicht die geladene Konfiguration - fuer die Frage "hat die Unit schon WatchdogSec" zaehlt deshalb die Konfiguration (systemctl cat)
+WDC0=$(grep -E '^WatchdogSec=' "$W/unit.txt" | tail -1 | cut -d= -f2 || true)
+if [[ ! -f "$DROPF" ]] && [[ -n "$WDC0" && "$WDC0" != 0 && "$WDC0" != infinity ]]; then stop "Unit $UNITN hat schon WatchdogSec ($WDC0) aus anderer Quelle"; fi
 REST0=$(systemctl show -p Restart --value "$UNITN" 2>/dev/null || echo "?")
 ADD_R=0
 case "$REST0" in always|on-failure|on-abnormal|on-watchdog) ;; *) ADD_R=1;; esac
@@ -1259,6 +1262,22 @@ if [[ "$DRY" == 1 ]]; then
   exit 0
 fi
 if [[ "$NEED_D" == 1 || "$DROP_OK" == 0 ]]; then sudo -v || stop "sudo -v fehlgeschlagen (Passwort noetig?) - fuer Drop-in, Neustart des Dashboards und das Lesen des Journals erforderlich"; fi
+# Pruefung der von systemd GELADENEN Konfiguration nach daemon-reload. WatchdogUSec taugt dafuer nicht: der Wert wird erst beim Start des Dienstes uebernommen (systemd service.c: watchdog_original_usec = watchdog_usec in service_start(); die Eigenschaft WatchdogUSec liefert watchdog_original_usec) und bleibt bis zum Neustart beim alten Wert.
+wd_conf_check() {
+  local nd dp last rs na
+  nd=$(systemctl show -p NeedDaemonReload --value "$UNITN" 2>/dev/null || true)
+  [[ "$nd" == no ]] || { echo "NeedDaemonReload=${nd:-?} - systemd hat die Unit-Dateien nicht neu eingelesen"; return 1; }
+  dp=$(systemctl show -p DropInPaths --value "$UNITN" 2>/dev/null || true)
+  case " $dp " in *" $DROPF "*) ;; *) echo "DropInPaths enthaelt $DROPF nicht (${dp:-leer})"; return 1;; esac
+  systemctl cat "$UNITN" > "$W/unit.after" 2> "$W/unit.after.err" || { cat "$W/unit.after.err"; echo "systemctl cat $UNITN scheitert"; return 1; }
+  last=$(grep -E '^WatchdogSec=' "$W/unit.after" | tail -1 || true)
+  [[ "$last" == "WatchdogSec=$WDS" ]] || { echo "wirksame Zeile ist '${last:-keine WatchdogSec-Zeile}' statt WatchdogSec=$WDS (ueberschreibt ein spaeteres Drop-in?)"; return 1; }
+  na=$(systemctl show -p NotifyAccess --value "$UNITN" 2>/dev/null || true)
+  [[ "$na" == main ]] || { echo "NotifyAccess=${na:-?} statt main"; return 1; }
+  rs=$(systemctl show -p Restart --value "$UNITN" 2>/dev/null || true)
+  case "$rs" in always|on-failure|on-abnormal|on-watchdog) ;; *) echo "Restart=${rs:-?} deckt Watchdog-Ausfall nicht ab"; return 1;; esac
+  return 0
+}
 jc() { sudo -n journalctl "$@" 2>/dev/null || journalctl "$@" 2>/dev/null || true; }
 echo "Keine Datenbank-Aenderung: keine SQLite-Sicherung noetig (lagezentrum.db wird nicht angefasst)"
 # ---------- 4) Installieren ----------
@@ -1284,7 +1303,7 @@ rb() {
   fi
   [[ -f "$F.bak-relwatch-$TS" ]] && { cmp -s "$F" "$F.bak-relwatch-$TS" && echo "  dashboard.py = Sicherung ($(s16 "$F"))" || echo "  WARNUNG dashboard.py ungleich Sicherung"; }
   echo "  Datenbank wurde nicht veraendert (keine SQLite-Sicherung noetig)"
-  echo "alter Stand wieder aktiv: prepper-dashboard=$(systemctl is-active prepper-dashboard 2>/dev/null), prepper-sdr=$(systemctl is-active prepper-sdr 2>/dev/null), WatchdogSec=$(systemctl show -p WatchdogUSec --value "$UNITN" 2>/dev/null), HTTP / = $(code "$B/")"
+  echo "alter Stand wieder aktiv: prepper-dashboard=$(systemctl is-active prepper-dashboard 2>/dev/null), prepper-sdr=$(systemctl is-active prepper-sdr 2>/dev/null), WatchdogUSec (Laufzeitwert)=$(systemctl show -p WatchdogUSec --value "$UNITN" 2>/dev/null), HTTP / = $(code "$B/")"
 }
 rbx() { if [[ "$RESTARTED_D" == 1 || "$NEED_D" == 1 || "$DROP_NEW" == 1 ]]; then rb "$1"; else echo "FEHLER: $1"; fi; exit 1; }
 if [[ "$NEED_D" == 0 && "$DROP_OK" == 1 ]]; then
@@ -1307,8 +1326,9 @@ else
     DROP_NEW=1
     sudo mkdir -p "$DROPDIR" && sudo install -m 0644 "$W/zz-relwatch.conf" "$DROPF" || { rb "Drop-in anlegen"; exit 1; }
     sudo systemctl daemon-reload || { rb "daemon-reload"; exit 1; }
-    [[ "$(systemctl show -p WatchdogUSec --value "$UNITN" 2>/dev/null || true)" == 5min && "$(systemctl show -p NotifyAccess --value "$UNITN" 2>/dev/null || true)" == main ]] || { rb "Drop-in von systemd nicht geladen (WatchdogUSec=$(systemctl show -p WatchdogUSec --value "$UNITN" 2>/dev/null || true), NotifyAccess=$(systemctl show -p NotifyAccess --value "$UNITN" 2>/dev/null || true))"; exit 1; }
-    echo "OK Drop-in $DROPF angelegt, daemon-reload ok, systemd zeigt WatchdogUSec=5min und NotifyAccess=main (wirksam erst mit dem Neustart)"
+    WDE=$(wd_conf_check) || { rb "Drop-in von systemd nicht geladen: $WDE"; exit 1; }
+    echo "OK Drop-in $DROPF angelegt, daemon-reload ok, von systemd geladen (NeedDaemonReload=no, DropInPaths enthaelt es, wirksame Zeile WatchdogSec=$WDS, NotifyAccess=main, Restart=$(systemctl show -p Restart --value "$UNITN" 2>/dev/null || true))"
+    echo "   Laufzeitwert WatchdogUSec vor dem Neustart: $(systemctl show -p WatchdogUSec --value "$UNITN" 2>/dev/null || true) (bleibt bis zum Neustart beim alten Wert, das ist normal; erst nach dem Neustart wird 5min erwartet)"
     [[ -f "$DROPF.bak-relwatch-$TS" ]] && echo "   (alte Drop-in-Datei gesichert: $DROPF.bak-relwatch-$TS)"
   fi
   RESTARTED_D=1
@@ -1317,6 +1337,9 @@ else
   sudo systemctl restart prepper-dashboard.service
   ok=0; for i in $(seq 1 80); do sleep 3; systemctl is-active --quiet prepper-dashboard && [[ "$(code "$B/")" == 200 ]] && { ok=1; break; }; done
   [[ "$ok" == 1 ]] || { rb "prepper-dashboard antwortet nach dem Neustart nicht (240 s)"; exit 1; }
+  WDR=$(systemctl show -p WatchdogUSec --value "$UNITN" 2>/dev/null || true)
+  [[ "$WDR" == 5min ]] || { rb "nach dem Neustart zeigt systemd WatchdogUSec=${WDR:-?} statt 5min (Drop-in vom neu gestarteten Dienst nicht uebernommen)"; exit 1; }
+  echo "OK nach dem Neustart: WatchdogUSec=$WDR (Laufzeitwert des neu gestarteten Dienstes)"
 fi
 PHASE=Pruefung
 # ---------- 5) Pruefung ----------
