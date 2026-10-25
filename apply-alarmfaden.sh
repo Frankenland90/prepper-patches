@@ -1187,14 +1187,14 @@ else
     [[ -n "$JP" ]] && echo "OK perfKeep weiter aktiv: $(echo "$JP" | cut -c1-120)" || rbx "Journal ohne 'perfKeep aktiv: perfKeep ok' (Regression)"
     JS=$(echo "$JD" | grep -F "sameOrigin aktiv: sameOrigin ok" | tail -1 || true)
     [[ -n "$JS" ]] && echo "OK sameOrigin weiter aktiv: $(echo "$JS" | cut -c1-120)" || rbx "Journal ohne 'sameOrigin aktiv: sameOrigin ok' (Regression)"
-    # der Faden startet erst nach dem ersten Voll-Update: bis zu 5 min warten (nur Hinweis, kein Rollback - ein langsamer Erststart ist kein Fehler)
+    # der Faden startet erst nach dem ersten Voll-Update: bis zu 10 min warten (nur Hinweis, kein Rollback - ein langsamer Erststart ist kein Fehler)
     JT=""
-    for i in $(seq 1 60); do
+    for i in $(seq 1 120); do
       JT=$(jc -u prepper-dashboard --since "@$T0D" --no-pager -o cat | grep -F "alarmFaden: NINA und DWD ab jetzt" | tail -1 || true)
       [[ -n "$JT" ]] && break; sleep 5
     done
     if [[ -n "$JT" ]]; then echo "OK alarm_loop gestartet: $(echo "$JT" | cut -c1-200)"
-    else echo "HINWEIS alarm_loop meldet sich noch nicht (erstes Voll-Update dauert laenger als 5 min?). Spaeter pruefen: curl -s $B/api/sysboot/status (alarm.thread true, alarm.n waechst alle 5 min)"; fi
+    else echo "HINWEIS alarm_loop meldet sich noch nicht (erstes Voll-Update dauert laenger als 10 min?). Spaeter pruefen: curl -s $B/api/sysboot/status (alarm.thread true, alarm.n waechst alle 5 min)"; fi
     JD=$(jc -u prepper-dashboard --since "@$T0D" --no-pager -o cat || true); echo "$JD" > "$W/jd.txt"
   fi
   E2=$(echo "$JD" | grep -c -E 'alarmFaden Selbsttest FEHLER|alarmFaden Lauf:|alarmFaden resync|alarmFaden NINA-Hook|alarmFaden DWD-Hook|alarmFaden Lage|sameOrigin Selbsttest FEHLER|keepLast heal:|perfKeep Selbsttest FEHLER' || true)
@@ -1219,7 +1219,7 @@ echo "OK Datenbank, Sende- und Alarmregeln, Gain-Wachter (Stufe 16, nur Automati
 echo "  dashboard.py sha16 $(s16 "$F"), $(wc -c < "$F") Bytes, $(wc -l < "$F") Zeilen"
 LB=$({ ls -1t "$F.bak-alarmfaden-"* 2>/dev/null || true; } | head -1); [[ -n "$LB" ]] && echo "Rueckweg (neueste Sicherung: $(basename "$LB")): cp -a $LB $F ; sudo systemctl restart prepper-dashboard" || echo "Rueckweg: keine sameOrigin-Sicherung vorhanden (nichts geaendert)"
 echo "Pruefen (nur lesend), jeweils einzeln:"
-echo "  curl -s $B/api/sysboot/status     (Abschnitt alarm: thread true, n waechst alle 5 min, src.nina.age_s/src.dwd.age_s unter 330, fails 0)"
+echo "  curl -s $B/api/sysboot/status     (Abschnitt alarm: thread true, n waechst alle 5 min, src.nina.age_s/src.dwd.age_s unter 420, fails 0)"
 echo "  sudo journalctl -u prepper-dashboard --since -30min --no-pager | grep alarmFaden"
 echo "Nichts gesendet (kein Mesh, kein Telegram, keine Alarme). Neue Docs-Version: bewusst nicht (nur dashboard.py geaendert)."
 echo "COMMIT $COMMIT_ARG alarmfaden=1 fertig"
