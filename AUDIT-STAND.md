@@ -1,6 +1,6 @@
 # AUDIT-STAND – Prepper-Dashboard (BND-Prepper)
 
-Stand: Sonntag 25.10.2026, 20:45 Uhr (Berlin), aktualisiert nach Anwendung von commit34 und commit35. Keine Secrets in dieser Datei.
+Stand: Dienstag 27.10.2026, 07:50 Uhr (Berlin), aktualisiert nach Anwendung von commit36 und commit37 (26.10.). Keine Secrets in dieser Datei.
 Geschrieben vom Ausführungs-Agenten (Grok Bot) fuer Frank. Hintergrund: Frank t822u – Kontingent geht zu Ende, clockOff (commit35) ist bis naechsten Samstag die letzte Audit-Verbesserung.
 
 Host: BND-Prepper, Debian 13 aarch64, systemd 257, Python 3.13, Port 5000, Benutzer fmg, Projekt `/home/fmg/prepper-dashboard`, kein node auf der Pi.
@@ -13,7 +13,8 @@ Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PER
       cd /home/fmg/prepper-dashboard && sha256sum *.py tools/*.sh | cut -c1-16,65-
 
   (erste 16 Zeichen je Datei mit dem Soll vergleichen).
-- Bestaetigt angewendet auf der Pi (Frank-Ausgaben, 25.10.2026): bis einschliesslich commit35 (dashboard.py `1831e7cd923396d1`, 25479 Zeilen; commit34 20:36, commit35 20:42, je alle Pruefungen OK).
+- Bestaetigt angewendet auf der Pi (Frank-Ausgaben): bis einschliesslich commit37 (dashboard.py `bb94f52af6e03c3b`, 25879 Zeilen; commit34 25.10. 20:36, commit35 25.10. 20:42, commit36 26.10. ~18:23, commit37 26.10. ~19:05, je alle Pruefungen OK).
+- commit36/37 sind Fehlerbehebungen waehrend der Wochenpause (NINA-Ausfall seit 26.10. 11:43; Entscheidung Frank zu zwei Texten der Lage-Seite). Die Pause bis Samstag 31.10. gilt weiter.
 - Es gibt keine veroeffentlichten, aber nicht angewendeten Patches. Jeder Patch prueft die Basis per sha16 und stoppt sonst mit klarer Meldung.
 
 ## 2. Pi-Stand (sha16 = erste 16 Hex-Zeichen von sha256)
@@ -29,7 +30,9 @@ Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PER
 | commit32 modDead (MOD-08) | ee4ea3123eb561c4 |
 | commit33 secXmlDash | 1574109c8609cf26 |
 | commit34 wxSlot | 03ee294d6e4ed56f |
-| commit35 clockOff | **1831e7cd923396d1** <- bestaetigter Pi-Stand (25.10. 20:42), gleich Branch kaeswasser-lage-monitor |
+| commit35 clockOff | 1831e7cd923396d1 |
+| commit36 ninaFix | 8510b08e868edc46 |
+| commit37 hideTexts | **bb94f52af6e03c3b** <- bestaetigter Pi-Stand (26.10. ~19:05), gleich Branch kaeswasser-lage-monitor |
 
 ### weitere Dateien (Soll laut Apply-Skripten; auf der Pi gegenpruefen, nicht alle in dieser Sitzung erneut gelesen)
 
@@ -50,6 +53,7 @@ Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PER
 | mesh_hang_watchdog | 1518dbd9931c5e96 | relHygiene (aelterer Stand) |
 | lage_clock.py | sha256 beginnt c909aea1148518fe | relClock commit25 |
 | lage_disk.py | sha256 beginnt 4b6b35ab7c97dfc7 | relClock; relClock2 (25b) kann abweichen |
+| certs/sectigo-e36.pem | DER sha256 beginnt 873f0ba8 (Sectigo Public Server Authentication CA DV E36) | ninaFix commit36 |
 
 Hinweis: Wo "aelterer Stand" steht, kann ein spaeterer Patch die Datei veraendert haben – dann zaehlt der Wert aus dem juengsten Apply-Skript. Im Zweifel `sha256sum` auf der Pi.
 
@@ -82,6 +86,8 @@ Hinweis: Wo "aelterer Stand" steht, kann ein spaeterer Patch die Datei veraender
 | **33** | secXmlDash | SEC-11 Dashboard-Seite | 35b8350161382c7cb17651af8c559caf55a37b9a |
 | **34** | wxSlot | Wetter-Slot-Nachholung + Stromausfall-Zustand (Befund aus Pi-Journal) | cc913f0915af7e5784b9469095aa1c11e009fd1b |
 | **35** | clockOff | Zeit-Offset-Kachel aus chrony statt ntplib-Artefakt | 6bcd6aed89a8bc38c6169dd03b04470c8c0387c9 |
+| 36 | ninaFix | NINA-TLS: warnung.bund.de sendet kein Zwischenzertifikat; gepinnte Zwischenstelle Sectigo E36, kein verify=False | 5b9c1b48761bbc25995d090ae9dd34e85783dfb8 |
+| 37 | hideTexts | Lage-Seite: Zertifikatsketten-Hinweis (NINA-Fallback) und SDR-Rollentext (bc_note) ausgeblendet; Fehler und Ablauf unter 90 Tagen bleiben sichtbar, Hinweis weiter im Journal und unter /api/nina-cert | 0c41ed06127a138da3a227b94b4480240fdcc5e1 |
 
 Fett = vom Auftrag "19b/22/27–35" erfasst.
 
@@ -96,21 +102,23 @@ Fett = vom Auftrag "19b/22/27–35" erfasst.
 | 33 | 82a1be1a5ef5f565e3db0d2251fa8aede47680a5 |
 | 34 | d4fea9c372b5dc2d3af500d4ee66df1d38d78557 |
 | 35 | bd10e68dd1bb953ff74dceca6aba53a8de827d49 |
+| 36 | 9b9cd7e41c2c67efdbfa335a723a00b01ec54827 |
+| 37 | a9c4839496afe2a0e70eab1aa5e3f89bce1f6343 |
 
 Aeltere Branch-Commits (secXml: lage_xml/database c7c27ed8…, requirements a2f411fa…, .gitignore 48a77020…, MOD-10-Aufraeumen archive/*, Audit-Doku eb48496f…): `git log` im Repo.
 
 ### Apply-Skripte (Groesse / sha256 der letzten drei)
 
-- apply-secxmldash.sh (33): 49463 B, sha256 9e9105c2feefb6f30a3204392b34cd93d8f418704a0ad788851bc9155861d642
-- apply-wxslot.sh (34): 79610 B, sha256 72c80c93b1e134e1ca215e4f749f150859dc4c09e093921e1b23e6a7fc6b932c
 - apply-clockoff.sh (35): 61369 B, sha256 d23efde416a8fe4e03cfab8e0ecfd84cac24cce37f67f652f690e8cd005ae16b
+- apply-ninafix.sh (36): 95921 B, sha256 7331a9fb13032a10b87203864b23780a488e720b2f3279525c1f75813bd6c940
+- apply-hidetexts.sh (37): 57269 B, sha256 2cfe62af513bf809fa780ba8acea40f44e4e90892cf36c9763592c6bd2f3f42f
 
 Aufruf je Patch: `bash /tmp/apply-<name>.sh commitNN dry-run` (erst Trockenlauf), dann ohne `dry-run`. Ein sudo-Prompt, nur der Dienst prepper-dashboard wird neu gestartet. wxSlot und clockOff stoppen mit klarer Meldung, wenn der Neustart in die Wetter-Slot-Zeit fallen wuerde (HH:55–HH:04 um 0,3,…,21 Uhr; HH:55–HH:59 der Slot-Stunden) – dann einfach nach der Zeit neu starten.
 
 ## 4. Erledigte Audit-IDs (Patches veroeffentlicht)
 
 REL-01, REL-02 (30), REL-03 (18/18b), REL-04, REL-09 (19/19b), REL-05, REL-06 (25/25b), REL-07 (23), MOD-02 (20), MOD-04 Stufe 1 (22), MOD-08 (32), MOD-09 (28), MOD-10 (Repo-Aufraeumen, Branch-Commits), PERF-02 (29), PERF-03 Backup-Teil (18), PERF-05 (21), PERF-06 (23), SEC-01 Code-Seite (26), SEC-04, SEC-12 (26), SEC-05 (28), SEC-09/10/11 (24, 31x, 33), SEC-13 Teil: Chart.js lokal (19). SEC-02/SEC-03 (Laufzeitdaten/.gitignore) laut Branch-Commits behandelt – in dieser Sitzung nicht neu geprueft.
-Zusatz ohne Audit-ID: commit27 perfKeep, 31 dbVis, 31b mapUi, 34 wxSlot (Wetter-Slot, aus Pi-Journal), 35 clockOff (Uhr-Kachel).
+Zusatz ohne Audit-ID: commit27 perfKeep, 31 dbVis, 31b mapUi, 34 wxSlot (Wetter-Slot, aus Pi-Journal), 35 clockOff (Uhr-Kachel), 36 ninaFix (NINA-TLS), 37 hideTexts (Lage-Texte).
 
 ## 5. Bewusst offen (Entscheidung Frank)
 
@@ -126,12 +134,14 @@ SEC-01 (nur Code-Seite erledigt, Rest bewusst offen), SEC-06, SEC-08.
 - Docs-Version: prepper_docs.py nennt noch "Stratum Offset (ntplib)" an 3 Stellen (~Zeilen 138/278/603). Ersatztext liegt in `/workspace/clockoff/DOCS_TEXT.md`.
 - ca. 250 alte `.bak`-Dateien im Projektordner (Patches behalten je 3 eigene Backups; Altbestand aufraeumen)
 - ca. 130 tote Zeilen in prepper_sdr.py
+- /pi-Antwortzeit: Median direkt nach den Neustarts fuer commit36/37 je 2,2 s (vorher 0,15-0,18 s); Nachmessung im eingeschwungenen Zustand steht aus. Bleibt sie hoch, gehoert das zu PERF-01.
+- gepinnte Zwischenstelle certs/sectigo-e36.pem: noch ca. 3434 Tage gueltig (Stand 26.10.); entfaellt, sobald warnung.bund.de die Kette wieder vollstaendig sendet.
 - root-eigenes `~ip` im venv (stoert pip; als root pruefen/entfernen)
 
 ## 7. Hinweise fuer den Wiedereinstieg
 
 - Arbeitsordner auf der Box: `/workspace/<patchname>` (`wxslot`, `clockoff`, `bridges`, `relclock`, …) mit `mk/` (Edits, Block, Konfig, apply-*.sh), `src2/` (Pruefprogramm `guard_*.py`), `sim/` (Simulationen), `testout/`. Werkzeuge: `/workspace/lib/mk_apply_dash.py` (Apply-Generator), `/workspace/lib/run_sim_dash.sh`, `/workspace/lib/chain_dash.sh`. Fortschritt: `/workspace/rel01/PROGRESS.md`. Standard: `/workspace/audit-run/PATCH_STANDARD.md`.
-- Naechster Patch baut auf dashboard.py `1831e7cd923396d1` (nach commit35) auf; Basis-Hash im Generator-Config (`cfg_*.py`) anpassen.
+- Naechster Patch baut auf dashboard.py `bb94f52af6e03c3b` (nach commit37) auf; Basis-Hash im Generator-Config (`cfg_*.py`) anpassen.
 - Simulationen nur auf Port 5093, immer nur eine gleichzeitig, keine Screenshots.
 - Empfohlene Reihenfolge nach der Pause: (1) auf der Pi pruefen, ob der Wetter-Slot (Wetter, Pegel, Heartbeat alle 3 h) ohne Luecke kam und die Kachel "Zeit-Offset" stimmt (curl -s http://127.0.0.1:5000/api/sysboot/status, Journal grep wxSlot); (2) kleine Fixes: Docs-Version (DOCS_TEXT.md), REL-10, async-Minifix, INT-3; (3) Aufraeumen (.bak, tote Zeilen, ~ip); (4) groessere Umbauten nur nach Freigabe.
 - **Freigabe von Frank noetig vor:** PERF-01, MOD-05, MOD-06, MOD-07, PERF-03 (Rest), PERF-04.
