@@ -11,7 +11,7 @@ export TZ=Europe/Berlin
 export PYTHONDONTWRITEBYTECODE=1
 export PATH="${PATH:-/usr/bin:/bin}:/usr/sbin:/sbin:/usr/local/bin"
 
-FC_VERSION="2.0.0"
+FC_VERSION="2.0.1"
 T0=$SECONDS
 
 # ---------------------------------------------------------------- Konfiguration (Umgebungsvariablen FC_* nur fuer Tests/Sonderfaelle)
@@ -43,7 +43,7 @@ NINA_PEM_REL="certs/sectigo-e36.pem"; NINA_PEM_DER16="873f0ba8"   # DER-sha256 b
 REFS=(database.py:e7a7ef192c522480 lage_xml.py:f77305fc17ed2f77 mesh_bridge.py:3482f6e386cf26ce mesh_bridge_bayern.py:c1176b457346ae49
       mesh_bridge_core.py:ddc134f29a6a8949 luft.py:0ccae0834ab27f6d secret_util.py:ff8e2ac7049f4bde tools/backup.sh:5053f6b8a43a8638
       tools/restore.sh:c0e305b8ea4d9007 health_check.py:5a0156ff02d5960c prepper_docs.py:609f0a7f00ab586b lage_clock.py:c909aea1148518fe lage_disk.py:4b6b35ab7c97dfc7)
-AIRSPY_SN="637862DC2E8092D7"; STICK1_SN="19348831"; STICK2_SN="72055505"; STICK3_SN="26102403"
+AIRSPY_VIDPID="1d50:60a1"; AIRSPY_SN="637862DC2E8092D7"; STICK1_SN="19348831"; STICK2_SN="72055505"; STICK3_SN="26102403"
 
 # ---------------------------------------------------------------- Optionen
 QUICK=0; JSON=0; SUDO=0; NOCOL=0; SELFTEST=0
@@ -515,7 +515,13 @@ if have dmesg; then
     DMC="$(pf "$DM" | grep -Ec "$DMP")"; [[ "$DMC" =~ ^[0-9]+$ ]] || DMC=0
     if (( DMC > 0 )); then
       LASTL="$(pf "$DM" | grep -E "$DMP" | tail -1)"
-      warn "Kernel-Meldungen (dmesg)" "$DMC Zeile(n) mit Fehlerbezug seit dem Boot, zuletzt: $(mask "${LASTL:0:140}")" "dmesg lesen (journalctl -k); bei I/O-/Dateisystemfehlern Datentraeger sichern und pruefen."
+      DMAGE=""
+      DMTS=""; [[ "$LASTL" =~ ^\[\ *([0-9]+)\.[0-9]+\] ]] && DMTS="${BASH_REMATCH[1]}"
+      if [[ -n "$DMTS" && "${US:-}" =~ ^[0-9]+$ ]]; then
+        DMA=$((US - DMTS)); (( DMA < 0 )) && DMA=0
+        DMAGE=" (Zeitstempel $DMTS s nach dem Boot, Uptime $(dur "$US"): letzte Meldung vor $(dur "$DMA")$( ((DMA > 3600)) && echo ', also alt' ))"
+      fi
+      warn "Kernel-Meldungen (dmesg)" "$DMC Zeile(n) mit Fehlerbezug seit dem Boot$DMAGE, zuletzt: $(mask "${LASTL:0:140}")" "Der Kernel-Puffer behaelt Meldungen bis zum Neustart: eine alte Meldung ist kein aktuelles Problem. dmesg lesen (journalctl -k); bei I/O-/Dateisystemfehlern Datentraeger sichern und pruefen."
     else ok "Kernel-Meldungen (dmesg)" "keine I/O-/Dateisystem-/Unterspannungs-/OOM-Fehler seit dem Boot"; fi
   fi
 else skip "Kernel-Meldungen (dmesg)" "dmesg fehlt"; fi
@@ -657,7 +663,7 @@ else warn "Dienste" "systemctl fehlt - Dienstpruefung nicht moeglich" "Nur auf d
 # ================================================================ 4) Dashboard
 section "Dashboard (Port $PORT)"
 BASEURL="http://$HOSTN:$PORT"
-DASH_UP=1; NINA_MODE=""
+DASH_UP=1; NINA_MODE=""; WD_ALL_LVL=""; WD_AIRSPY_LVL=""
 if ! have curl; then
   warn "Dashboard" "curl fehlt - Seiten-/API-Pruefung nicht moeglich" "Paket curl pruefen."; DASH_UP=0
 else
@@ -856,11 +862,20 @@ if (( DASH_UP )); then
       rot) fail "SDR-Daten-Watchdog" "$WT" "Stick/Empfang pruefen (Dashboard /funk); prepper-sdr-Journal lesen." ;;
       *) info "SDR-Daten-Watchdog" "${WT:-keine Bewertung} (Stufe ${WL:-?})" ;;
     esac
+    WD_ALL_LVL="$WL"
     NS="$(jv sticks.#)"
     if [[ "$NS" =~ ^[0-9]+$ ]]; then
       for ((i = 0; i < NS && i < 6; i++)); do
         SL="$(jv "sticks.$i.lvl")"; STX="$(mask "$(jv "sticks.$i.txt")")"
-        case "$SL" in gelb) warn "SDR Stick $((i + 1)) (Watchdog)" "$STX" "Stick im Dashboard ansehen." ;; rot) fail "SDR Stick $((i + 1)) (Watchdog)" "$STX" "Stick/Empfang pruefen." ;; *) info "SDR Stick $((i + 1)) (Watchdog)" "$STX" ;; esac
+        # Benennung nach der Rolle im Watchdog-Text (nicht nach Listenplatz): Airspy 11D, Stick 1 5C, Stick 2 Hobby, Stick 3 Hobby2
+        case "$STX" in
+          *[Aa]irspy*|*11D*) RNAME="Airspy 11D"; WD_AIRSPY_LVL="${SL:-?}" ;;
+          *"Stick 1"*|*5C*) RNAME="Stick 1 5C" ;;
+          *"Stick 2"*) RNAME="Stick 2 Hobby" ;;
+          *"Stick 3"*) RNAME="Stick 3 Hobby2" ;;
+          *) RNAME="Eintrag $((i + 1))" ;;
+        esac
+        case "$SL" in gelb) warn "SDR $RNAME (Watchdog)" "$STX" "Stick im Dashboard ansehen." ;; rot) fail "SDR $RNAME (Watchdog)" "$STX" "Stick/Empfang pruefen." ;; *) info "SDR $RNAME (Watchdog)" "$STX" ;; esac
       done
     fi
   else skip "SDR-Daten-Watchdog" "/api/sdr/wd lieferte HTTP $HTTP_CODE"; fi
@@ -981,24 +996,55 @@ else warn "Stromausfall-Stand (Datei)" "outage_mesh_state.json fehlt" "Wird nach
 
 # ================================================================ 7) SDR
 section "SDR (nur lesen, keine Sticks geoeffnet)"
-declare -A USBSN=()
+declare -A USBSN=() USBID=() USBID_SN=()
 for d in "$SYS"/bus/usb/devices/*; do
-  [[ -r "$d/serial" ]] || continue
-  read -r sn < "$d/serial" 2>/dev/null || continue
+  [[ -d "$d" ]] || continue
+  sn=""; [[ -r "$d/serial" ]] && { read -r sn < "$d/serial" 2>/dev/null || sn=""; }
   pr=""; [[ -r "$d/product" ]] && read -r pr < "$d/product" 2>/dev/null
-  USBSN["${sn^^}"]="${pr:-?}"
+  [[ -n "$sn" ]] && USBSN["${sn^^}"]="${pr:-?}"
+  vid=""; pid=""
+  [[ -r "$d/idVendor" ]] && read -r vid < "$d/idVendor" 2>/dev/null
+  [[ -r "$d/idProduct" ]] && read -r pid < "$d/idProduct" 2>/dev/null
+  if [[ -n "$vid" && -n "$pid" ]]; then USBID["${vid,,}:${pid,,}"]=$(( ${USBID["${vid,,}:${pid,,}"]:-0} + 1 )); USBID_SN["${vid,,}:${pid,,}"]="${sn^^}"; fi
 done
+# zusaetzlich lsusb (ohne Optionen = nur die Geraeteliste aus sysfs, oeffnet kein Geraet): "Bus 001 Device 003: ID 1d50:60a1 ..."
+LSUSB_SEEN=0
+if have lsusb; then
+  LSU="$(timeout 10 lsusb 2>/dev/null)"
+  while read -r _ _ _ _ _ lid _; do
+    [[ "$lid" =~ ^[0-9a-fA-F]{4}:[0-9a-fA-F]{4}$ ]] || continue
+    LSUSB_SEEN=$((LSUSB_SEEN + 1))
+    [[ -n "${USBID[${lid,,}]:-}" ]] || USBID["${lid,,}"]=1
+  done <<<"$LSU"
+fi
 sdr_dev() { # serial name severity-if-missing
   local sn="${1^^}"
   if [[ -n "${USBSN[$sn]:-}" ]]; then ok "$2 (SN $1)" "am USB-Bus gefunden: ${USBSN[$sn]:0:40}"
   else _emit "$3" "$2 (SN $1)" "nicht am USB-Bus gefunden" "Stick/USB-Kabel/Hub pruefen (lsusb); SDR-Zugriff nur ueber prepper-sdr."; fi
 }
-if (( ${#USBSN[@]} > 0 )); then
-  sdr_dev "$AIRSPY_SN" "Airspy R2 (11D fest)" fail
+# Airspy R2: Erkennung ueber VID:PID 1d50:60a1 (Existenz = OK, auch ohne Seriennummer im sysfs); Seriennummer nur lesend aus sysfs verglichen
+airspy_check() {
+  local nm="Airspy R2 (11D fest)" got="${USBID_SN[$AIRSPY_VIDPID]:-}" exp="${AIRSPY_SN^^}" src="sysfs"
+  [[ -n "${USBID[$AIRSPY_VIDPID]:-}" ]] || src=""
+  if [[ -n "$src" ]]; then
+    if [[ -n "${USBSN[$exp]:-}" ]]; then ok "$nm (SN $AIRSPY_SN)" "am USB-Bus gefunden (VID:PID $AIRSPY_VIDPID), Seriennummer passt"
+    elif [[ -n "$got" ]]; then warn "$nm (SN $AIRSPY_SN)" "VID:PID $AIRSPY_VIDPID gefunden, aber Seriennummer weicht ab (gelesen: ${got:0:24}, erwartet: $AIRSPY_SN)" "Anderer Airspy angesteckt oder getauscht? Nur Anzeige - Empfang laeuft laut Watchdog separat (Dashboard /funk)."
+    else ok "$nm (SN $AIRSPY_SN)" "am USB-Bus gefunden (VID:PID $AIRSPY_VIDPID); Seriennummer im sysfs nicht lesbar - nur die Existenz geprueft"; fi
+    return
+  fi
+  if [[ -n "${USBSN[$exp]:-}" ]]; then ok "$nm (SN $AIRSPY_SN)" "ueber die Seriennummer am USB-Bus gefunden: ${USBSN[$exp]:0:40}"; return; fi
+  if [[ "$WD_AIRSPY_LVL" == ok || ( -z "$WD_AIRSPY_LVL" && "$WD_ALL_LVL" == ok ) ]]; then
+    warn "$nm (SN $AIRSPY_SN)" "Widerspruch: weder VID:PID $AIRSPY_VIDPID noch Seriennummer am USB-Bus gefunden, aber der Daten-Watchdog meldet Empfang ok" "lsusb als Benutzer fmg lesen (nur Anzeige); Skript/Rechte pruefen, Empfang laeuft offenbar."
+  else
+    fail "$nm (SN $AIRSPY_SN)" "nicht am USB-Bus gefunden (VID:PID $AIRSPY_VIDPID) und der Daten-Watchdog meldet keinen Empfang (${WD_AIRSPY_LVL:-${WD_ALL_LVL:-keine Angabe}})" "Airspy/USB-Kabel/Hub pruefen (lsusb); SDR-Zugriff nur ueber prepper-sdr."
+  fi
+}
+if (( ${#USBSN[@]} > 0 || ${#USBID[@]} > 0 )); then
+  airspy_check
   sdr_dev "$STICK1_SN" "Stick 1 (5C/10C)" fail
   sdr_dev "$STICK2_SN" "Stick 2 (hobby)" warn
   sdr_dev "$STICK3_SN" "Stick 3 (hobby2)" warn
-else skip "SDR-Sticks am USB-Bus" "keine USB-Seriennummern lesbar ($SYS/bus/usb/devices)"; fi
+else skip "SDR-Sticks am USB-Bus" "keine USB-Geraeteliste lesbar ($SYS/bus/usb/devices, lsusb)"; fi
 AGF="$APP/sdr_autogain.json"
 if [[ -r "$AGF" ]] && jload flat < "$AGF"; then
   CUR="$(jv cur)"; AMODE="$(jv mode)"; LK="$(jv lock.kind)"; FLT="$(jv fault)"
