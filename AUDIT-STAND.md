@@ -1,7 +1,7 @@
 # AUDIT-STAND – Prepper-Dashboard (BND-Prepper)
 
-Stand: Freitag 30.10.2026, 19:30 Uhr (Berlin), aktualisiert nach Anwendung von commit38 docsVer, commit39 relStop und commit40 asyncMini. Keine Secrets in dieser Datei.
-Geschrieben vom Ausfuehrungs-Agenten (Grok Bot) fuer Frank. Vorige Fassung: 27.10. (Blob 8dbbc2f2).
+Stand: Freitag 30.10.2026, 23:30 Uhr (Berlin), aktualisiert nach Anwendung von commit41 pagesSplit1, commit42 pagesSplit2, commit43 pagesSplit3 und commit44 pegelSplit. Keine Secrets in dieser Datei.
+Geschrieben vom Ausfuehrungs-Agenten (Grok Bot) fuer Frank. Vorige Fassung: 30.10. 19:30 (Blob e4e8e5b8).
 
 Host: BND-Prepper, Debian 13 aarch64, systemd 257, Python 3.13, Port 5000, Benutzer fmg, Projekt `/home/fmg/prepper-dashboard`, kein node auf der Pi.
 Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PERF-01..08, REL-01..10, MOD-01..10).
@@ -12,8 +12,12 @@ Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PER
 
       cd /home/fmg/prepper-dashboard && sha256sum *.py tools/*.sh | cut -c1-16,65-
 
+  Nur die zwei Hauptdateien, ohne Pipe: `sha256sum /home/fmg/prepper-dashboard/dashboard.py /home/fmg/prepper-dashboard/lage_pages.py`
+
   (erste 16 Zeichen je Datei mit dem Soll vergleichen).
-- Bestaetigt angewendet auf der Pi (Frank-Ausgaben): bis einschliesslich commit40 (dashboard.py `f8977a31bf4c177f`, 26046 Zeilen, 1311834 B, 19 Marker je 1x; commit38 29.10. 22:33, commit39 29.10. 23:24, commit40 30.10. 06:36, je alle Pruefungen OK).
+- Bestaetigt angewendet auf der Pi (Frank-Ausgaben): bis einschliesslich commit44 (dashboard.py `1898fde2aa91d066`, 21790 Zeilen, 1118288 B; lage_pages.py `7f9fc0cf17d52644`, 4480 Zeilen, 204586 B; 23 Marker je 1x). commit41 30.10. 19:42, commit42 30.10. 20:45, commit43 30.10. 22:08, commit44 30.10. 23:08, je alle Pruefungen OK.
+- Davor: commit38 29.10. 22:33, commit39 29.10. 23:24, commit40 30.10. 06:36 (dashboard.py `f8977a31bf4c177f`, 26046 Zeilen).
+- pegelFix (commit44) im Betrieb: Journal `pegelSplit aktiv: ... pegelFix: 3 Namen da`.
 - Aeltere Bestaetigungen: commit34 25.10. 20:36, commit35 25.10. 20:42, commit36 26.10. ~18:23, commit37 26.10. ~19:05.
 - relStop (commit39) im Betrieb bestaetigt: beim Neustart am 30.10. um 06:40:18 stand im Journal `relStop SIGTERM: uplinkDetect uplink_state.json gespeichert` und `fertig in 0.01 s`.
 - Es gibt keine veroeffentlichten, aber nicht angewendeten Patches. Jeder Patch prueft die Basis per sha16 und stoppt sonst mit klarer Meldung.
@@ -35,9 +39,22 @@ Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PER
 | commit36 ninaFix | 8510b08e868edc46 |
 | commit37 hideTexts | bb94f52af6e03c3b |
 | commit39 relStop (REL-10 Teil 3) | 7be7e011ee2426a6 |
-| commit40 asyncMini | **f8977a31bf4c177f** <- bestaetigter Pi-Stand (30.10. 06:36), 26046 Zeilen, gleich Branch kaeswasser-lage-monitor (Blob 1d08a37e) |
+| commit40 asyncMini | f8977a31bf4c177f (26046 Zeilen) |
+| commit41 pagesSplit1 | 7ffa9d33c5fd4974 (25718 Zeilen) |
+| commit42 pagesSplit2 | 6661a7f77b1e1487 (23683 Zeilen) |
+| commit43 pagesSplit3 | 64a83af070677323 (21976 Zeilen) |
+| commit44 pegelSplit | **1898fde2aa91d066** <- bestaetigter Pi-Stand (30.10. 23:08), 21790 Zeilen, gleich Branch kaeswasser-lage-monitor (Blob 891fd04f) |
 
-Marker in dashboard.py (je genau 1x): relHygiene, perfKeep, sameOrigin, alarmFaden, relWatch, dbVis, mapUi, modDead, secXmlDash, wxSlot, meshBootQuiet, funkHarden2, kartevec, clockOff, ninaFix, hideTexts, longArchive, relStop, asyncMini (19).
+### lage_pages.py (neu seit commit41: Seitenvorlagen aus dashboard.py, nur Text)
+
+| nach Patch | sha16 | Inhalt |
+|---|---|---|
+| commit41 pagesSplit1 | e7b3bb1ea1a145d3 (361 Zeilen) | PAGE_ADSB |
+| commit42 pagesSplit2 | 6a596584014df095 (2471 Zeilen) | + PAGE4, PAGE_SPEICHER, PAGE_UMWELT2, PAGE_PI, PAGE_MESH, PAGE_NEWS, PAGE_LUFT |
+| commit43 pagesSplit3 | 231d4c309c1ae009 (4241 Zeilen) | + PAGE1, PAGE2, PAGE3, PAGE_LOKALE_ENERGIE |
+| commit44 pegelSplit | **7f9fc0cf17d52644** (4480 Zeilen) <- Pi-Stand, Branch-Blob 1f38c694 | + PAGE_PEGEL |
+
+Marker in dashboard.py (je genau 1x): relHygiene, perfKeep, sameOrigin, alarmFaden, relWatch, dbVis, mapUi, modDead, secXmlDash, wxSlot, meshBootQuiet, funkHarden2, kartevec, clockOff, ninaFix, hideTexts, longArchive, relStop, asyncMini, pagesSplit1, pagesSplit2, pagesSplit3, pegelSplit (23).
 
 ### weitere Dateien (Soll laut Apply-Skripten; auf der Pi gegenpruefen, nicht alle in dieser Sitzung erneut gelesen)
 
@@ -98,8 +115,12 @@ Hinweis: Wo "aelterer Stand" steht, kann ein spaeterer Patch die Datei veraender
 | **38** | docsVer | Docs-Version: prepper_docs.py Generator-Version 2 (Uhr-Kachel-Text, NINA-Texte neutral) | b682f2ac7dcbedfa986f316ea0e5288cbb85a4bc |
 | **39** | relStop | REL-10 Teil 3: Zustaende beim Beenden sichern (SIGTERM-Haken vor longArchive, uplinkDetect force, Budget 4 s) | 32248b2dae03e58814c74a26c23a61320580a1ec |
 | **40** | asyncMini | async-Minifix: verwaister `<script>async</script>` auf der Lage-Seite entfernt | dd70db25d6819156c2af032e901ba713766b5dd7 |
+| **41** | pagesSplit1 | MOD-06/07 Pilot: ADS-B-Seitenvorlage nach lage_pages.py | b9f586a0820a02512e74272b6f95cf85f1dc6653 |
+| **42** | pagesSplit2 | MOD-06/07: 7 Seitenvorlagen nach lage_pages.py | 9a1a5a215ba6a060fdfa24a64c4f3f2f79204c98 |
+| **43** | pagesSplit3 | MOD-06/07: 4 Seitenvorlagen (Lage, Energie, System, Lokale Energie) | f6fe84cde9538b9ff8602fc9aabddf46009f6f53 |
+| **44** | pegelSplit | pegelFix (NameError last_pegel_mesh_auto) + PAGE_PEGEL nach lage_pages.py | b7370c0d7208649c351d265e469a3976debc3ab5 |
 
-Fett = vom Auftrag "19b/22/27–35" erfasst, sowie die neuen Commits 38–40.
+Fett = vom Auftrag "19b/22/27–35" erfasst, sowie die neuen Commits 38–44.
 
 ### dashboard.py auf Branch `kaeswasser-lage-monitor` (Repo Frankenland90/kaeswasser-lage-monitor)
 
@@ -117,10 +138,19 @@ Fett = vom Auftrag "19b/22/27–35" erfasst, sowie die neuen Commits 38–40.
 | 38 docsVer (prepper_docs.py, Blob 63befa06) | 7d2f4d68c2fd6ca1d899c452a6564cfe51d46e7c |
 | 39 relStop (Blob 70e4d61d) | 39f667b66dfb6fe83b4580c469d6c980ef49677e |
 | 40 asyncMini (Blob 1d08a37e) | 66e2026e355bd154c0a3e10b1faa04b275e35757 |
+| 41 pagesSplit1 (dashboard.py + lage_pages.py neu) | e293475e8bc7089df71ecc9a77fee6f1589bdfde |
+| 42 pagesSplit2 (Blobs a8f6c15f / 84269670) | d96af14ed3815fdab8479c803b096d0af9d9b794 |
+| 43 pagesSplit3 (Blobs e821823c / 87a77cc9) | 9d874fa8aa3505e3f09df69fe4d0b88a60774fc4 |
+| 44 pegelSplit (Blobs 891fd04f / 1f38c694) | bda993cbc77ee1f91e5a8ea26d47572b252f9d36 |
 
 Aeltere Branch-Commits (secXml: lage_xml/database c7c27ed8…, requirements a2f411fa…, .gitignore 48a77020…, MOD-10-Aufraeumen archive/*, Audit-Doku eb48496f…): `git log` im Repo.
 
-### Apply-Skripte (Groesse / sha256 der letzten drei)
+### Apply-Skripte (Groesse / sha256)
+
+- apply-pagessplit1.sh (41): 47433 B, sha256 fff792932d760826005176faea15753928c26f14e304c7aae23e3de3155ac4c4
+- apply-pagessplit2.sh (42): 53943 B, sha256 230b6d7a949fc4df56cfa09cdfab1365d606e74dc432655adcbdf9968b452aa0
+- apply-pagessplit3.sh (43): 55022 B, sha256 89f18bc671afbe7121bef6134c5e0fdc9d9418bb0ad1b279fd1b64c5a931823b
+- apply-pegelsplit.sh (44): 58782 B, sha256 d35ca97206613e336d7d9d30fcb012175c620a2631aa209b5c8ace45e8ad8d43
 
 - apply-docsver.sh (38): 50788 B, sha256 c1b0549ff7385040c9a8067c5500635f2a0733cbe0984158e2b2b347c567fd04
 - apply-relstop.sh (39): 41179 B, sha256 1667ff4a6affee7f15f2ecd18814d2ee7f47ff944b03f832f3feadb2dcdad957
@@ -132,6 +162,7 @@ Aufruf je Patch: `bash /tmp/apply-<name>.sh commitNN dry-run` (erst Trockenlauf)
 
 REL-01, REL-02 (30), REL-03 (18/18b), REL-04, REL-09 (19/19b), REL-05, REL-06 (25/25b), REL-07 (23), MOD-02 (20), MOD-04 Stufe 1 (22), MOD-08 (32), MOD-09 (28), MOD-10 (Repo-Aufraeumen, Branch-Commits), PERF-02 (29), PERF-03 Backup-Teil (18), PERF-05 (21), PERF-06 (23), SEC-01 Code-Seite (26), SEC-04, SEC-12 (26), SEC-05 (28), SEC-09/10/11 (24, 31x, 33), SEC-13 Teil: Chart.js lokal (19). SEC-02/SEC-03 (Laufzeitdaten/.gitignore) laut Branch-Commits behandelt – in dieser Sitzung nicht neu geprueft.
 REL-10 Teil 3 (39 relStop, im Betrieb bestaetigt). INT-3 (toter scanner_mode_set-Altcode mit sudo systemctl) erledigt durch commit32 modDead; am Stand f8977a31 gibt es kein `sudo systemctl` mehr im Dashboard.
+MOD-06/07 teilweise: 13 Seitenvorlagen in lage_pages.py (41-44), weitere Vorlagen und Code-Module offen. Befund NameError `last_pegel_mesh_auto` behoben (44 pegelFix; Sim-Nachweis: eine Pegel-Meldung pro Wetter-Slot wie vorher, keine zusaetzliche Sendung).
 Zusatz ohne Audit-ID: commit27 perfKeep, 31 dbVis, 31b mapUi, 34 wxSlot (Wetter-Slot, aus Pi-Journal), 35 clockOff (Uhr-Kachel), 36 ninaFix (NINA-TLS), 37 hideTexts (Lage-Texte), 38 docsVer (Docs-Version), 40 asyncMini (async-Minifix), fullcheck.sh 2.0.1 (read-only Pruefskript).
 
 ## 5. Bewusst offen (Entscheidung Frank)
@@ -144,21 +175,22 @@ SEC-01 (nur Code-Seite erledigt, Rest bewusst offen), SEC-06, SEC-08.
 - PERF-01, PERF-03 (Rest), PERF-04, PERF-07, PERF-08
 - REL-08
 - REL-10 Teil 1 (Alarmfaeden und NINA/DWD-Sofortrunde vor dem ersten Voll-Update): braucht Freigabe von Frank. REL-10 Teil 2 (network-online.target nicht blockierend, Wait-Online-Zeitlimit): offen.
-- MOD-01, MOD-03, MOD-05, MOD-06, MOD-07 (Modul-Aufteilung, siehe Abschnitt 7)
-- Befund NameError `last_pegel_mesh_auto` (Pegel-Mesh-Pfad): Fix offen; Loesung sind drei Zeilen mit Startwert None. Bewusst getrennt von anderen Patches.
+- MOD-01, MOD-03, MOD-05; MOD-06, MOD-07 (Seitenvorlagen in Schritten 41-44 begonnen, Rest offen)
 - fullcheck.sh 2.0.1 meldet 84/100; ein Abzug ist ein Airspy-Fehlalarm, Korrektur als 2.0.2 geplant.
 - Aufraeumen (offen, Auftrag vom 30.10. abgebrochen): ca. 250 alte `.bak`-Dateien im Projektordner in ein datiertes Archiv verschieben (nicht loeschen); ca. 130 tote Zeilen in prepper_sdr.py (3 ueberdeckte Erstfassungen: stk_run_cmds, stk_test_stick, _at_start)
-- /pi-Antwortzeit: Median direkt nach den Neustarts fuer commit36/37 je 2,2 s (vorher 0,15-0,18 s); Nachmessung im eingeschwungenen Zustand steht aus. Bleibt sie hoch, gehoert das zu PERF-01.
+- /pi-Antwortzeit: Median direkt nach dem Neustart wieder 2,2 s (commit44: vorher 0,20 s; ebenso bei commit36/37). Vermutlich Last des ersten Voll-Updates; Nachmessung im eingeschwungenen Zustand steht aus. Bleibt sie hoch, gehoert das zu PERF-01.
+- PERF-01 (WSGI-Server): Plan in Arbeit (30.10.), noch keine Freigabe, kein Patch.
+- Befund am Rande: funk_health.py und funk_page.py machen `from dashboard import fetch_mesh_status`. Weil dashboard.py als Hauptprogramm laeuft, laedt das beim ersten Aufruf dashboard.py ein zweites Mal als Modul `dashboard`. Nicht geaendert, nur gemeldet.
 - gepinnte Zwischenstelle certs/sectigo-e36.pem: noch ca. 3434 Tage gueltig (Stand 26.10.); entfaellt, sobald warnung.bund.de die Kette wieder vollstaendig sendet.
 - root-eigenes `~ip` im venv (Rest eines abgebrochenen pip-Laufs, stoert pip; nur melden/als root pruefen, gehoert zum Aufraeumen)
 
 ## 7. Hinweise fuer den Wiedereinstieg
 
 - Arbeitsordner auf der Box: `/workspace/<patchname>` (`wxslot`, `clockoff`, `bridges`, `relclock`, …) mit `mk/` (Edits, Block, Konfig, apply-*.sh), `src2/` (Pruefprogramm `guard_*.py`), `sim/` (Simulationen), `testout/`. Werkzeuge: `/workspace/lib/mk_apply_dash.py` (Apply-Generator), `/workspace/lib/run_sim_dash.sh`, `/workspace/lib/chain_dash.sh`. Fortschritt: `/workspace/rel01/PROGRESS.md`. Standard: `/workspace/audit-run/PATCH_STANDARD.md`.
-- Naechster Patch baut auf dashboard.py `f8977a31bf4c177f` (nach commit40) auf; Basis-Hash im Generator-Config (`cfg_*.py`) anpassen. Marker-Pruefung: 19 Marker.
+- Naechster Patch baut auf dashboard.py `1898fde2aa91d066` und lage_pages.py `7f9fc0cf17d52644` (nach commit44) auf; beide im Basis-Check. Marker-Pruefung: 23 Marker. Werkzeuge fuer weitere Seitenvorlagen: `/workspace/lib/pages/` (README.md; Namensliste reicht; Zusatzzeilen und spaetere `NAME = NAME.replace(...)`-Schichten werden unterstuetzt).
 - Simulationen nur auf Port 5093, immer nur eine gleichzeitig, keine Screenshots.
 - Kleine Fixes Docs-Version, REL-10 Teil 3, async-Minifix und INT-3 sind erledigt (30.10.).
-- **Naechster Schritt (Entscheidung Frank 30.10.): Modul-Aufteilung**, damit kuenftige Patches kleiner werden (dashboard.py 26046 Zeilen, 1,3 MB). Erst Plan und Freigabe, dann ein kleiner Pilot-Schritt (eine Seitenvorlage in ein eigenes Modul), danach schrittweise weiter. Aufraeumen und Pegel-Fix folgen spaeter.
+- Modul-Aufteilung laeuft (commit41-44: 13 Seitenvorlagen, dashboard.py von 26046 auf 21790 Zeilen). Aufraeumen folgt spaeter. Naechstes Thema: PERF-01 (erst Plan, dann Freigabe).
 - **Freigabe von Frank noetig vor:** PERF-01, MOD-05, MOD-06, MOD-07, PERF-03 (Rest), PERF-04.
 - Offene Beobachtung: fehlende Mesh-Meldungen werden vom anderen Worker untersucht (nicht Teil dieser Patches).
 
@@ -169,4 +201,4 @@ SEC-01 (nur Code-Seite erledigt, Rest bewusst offen), SEC-06, SEC-08.
 - Keine Secrets in Repos, Dateien oder Berichten.
 - Patch-Standard: strikter sha16-Basis-Check, Trockenlauf + idempotent, Backups `*.bak-<name>-JJJJMMTT-HHMMSS` (3 behalten), atomare Schreibvorgaenge, AST-Guard mit Mutationstest ohne node, py_compile mit System- und venv-Python, Sandbox-Selbsttests, nur betroffene Dienste neu starten, Smoke-Test aller 26 Seiten/APIs, Rollback mit klarer STOP-Meldung, ein sudo-Prompt, neue Docs-Version nur wenn prepper_docs.py im Umfang.
 - Hoechstens 4 Dateien pro Push. Neustart-Sperre HH:55–HH:04.
-- Sims nur auf Port 5093; Veroeffentlichung: prepper-patches (main) bekommt `apply-<name>.sh`, Branch kaeswasser-lage-monitor bekommt `dashboard.py`; danach Raw-Pruefung (cmp, sha256, bash -n) gegen den festgenagelten Commit.
+- Sims nur auf Port 5093; Veroeffentlichung: prepper-patches (main) bekommt `apply-<name>.sh`, Branch kaeswasser-lage-monitor bekommt `dashboard.py` (und `lage_pages.py`); danach Raw-Pruefung (cmp, sha256, bash -n) gegen den festgenagelten Commit.
