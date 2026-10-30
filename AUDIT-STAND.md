@@ -1,7 +1,7 @@
 # AUDIT-STAND – Prepper-Dashboard (BND-Prepper)
 
-Stand: Dienstag 27.10.2026, 07:50 Uhr (Berlin), aktualisiert nach Anwendung von commit36 und commit37 (26.10.). Keine Secrets in dieser Datei.
-Geschrieben vom Ausführungs-Agenten (Grok Bot) fuer Frank. Hintergrund: Frank t822u – Kontingent geht zu Ende, clockOff (commit35) ist bis naechsten Samstag die letzte Audit-Verbesserung.
+Stand: Freitag 30.10.2026, 19:30 Uhr (Berlin), aktualisiert nach Anwendung von commit38 docsVer, commit39 relStop und commit40 asyncMini. Keine Secrets in dieser Datei.
+Geschrieben vom Ausfuehrungs-Agenten (Grok Bot) fuer Frank. Vorige Fassung: 27.10. (Blob 8dbbc2f2).
 
 Host: BND-Prepper, Debian 13 aarch64, systemd 257, Python 3.13, Port 5000, Benutzer fmg, Projekt `/home/fmg/prepper-dashboard`, kein node auf der Pi.
 Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PERF-01..08, REL-01..10, MOD-01..10).
@@ -13,8 +13,9 @@ Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PER
       cd /home/fmg/prepper-dashboard && sha256sum *.py tools/*.sh | cut -c1-16,65-
 
   (erste 16 Zeichen je Datei mit dem Soll vergleichen).
-- Bestaetigt angewendet auf der Pi (Frank-Ausgaben): bis einschliesslich commit37 (dashboard.py `bb94f52af6e03c3b`, 25879 Zeilen; commit34 25.10. 20:36, commit35 25.10. 20:42, commit36 26.10. ~18:23, commit37 26.10. ~19:05, je alle Pruefungen OK).
-- commit36/37 sind Fehlerbehebungen waehrend der Wochenpause (NINA-Ausfall seit 26.10. 11:43; Entscheidung Frank zu zwei Texten der Lage-Seite). Die Pause bis Samstag 31.10. gilt weiter.
+- Bestaetigt angewendet auf der Pi (Frank-Ausgaben): bis einschliesslich commit40 (dashboard.py `f8977a31bf4c177f`, 26046 Zeilen, 1311834 B, 19 Marker je 1x; commit38 29.10. 22:33, commit39 29.10. 23:24, commit40 30.10. 06:36, je alle Pruefungen OK).
+- Aeltere Bestaetigungen: commit34 25.10. 20:36, commit35 25.10. 20:42, commit36 26.10. ~18:23, commit37 26.10. ~19:05.
+- relStop (commit39) im Betrieb bestaetigt: beim Neustart am 30.10. um 06:40:18 stand im Journal `relStop SIGTERM: uplinkDetect uplink_state.json gespeichert` und `fertig in 0.01 s`.
 - Es gibt keine veroeffentlichten, aber nicht angewendeten Patches. Jeder Patch prueft die Basis per sha16 und stoppt sonst mit klarer Meldung.
 
 ## 2. Pi-Stand (sha16 = erste 16 Hex-Zeichen von sha256)
@@ -32,7 +33,11 @@ Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PER
 | commit34 wxSlot | 03ee294d6e4ed56f |
 | commit35 clockOff | 1831e7cd923396d1 |
 | commit36 ninaFix | 8510b08e868edc46 |
-| commit37 hideTexts | **bb94f52af6e03c3b** <- bestaetigter Pi-Stand (26.10. ~19:05), gleich Branch kaeswasser-lage-monitor |
+| commit37 hideTexts | bb94f52af6e03c3b |
+| commit39 relStop (REL-10 Teil 3) | 7be7e011ee2426a6 |
+| commit40 asyncMini | **f8977a31bf4c177f** <- bestaetigter Pi-Stand (30.10. 06:36), 26046 Zeilen, gleich Branch kaeswasser-lage-monitor (Blob 1d08a37e) |
+
+Marker in dashboard.py (je genau 1x): relHygiene, perfKeep, sameOrigin, alarmFaden, relWatch, dbVis, mapUi, modDead, secXmlDash, wxSlot, meshBootQuiet, funkHarden2, kartevec, clockOff, ninaFix, hideTexts, longArchive, relStop, asyncMini (19).
 
 ### weitere Dateien (Soll laut Apply-Skripten; auf der Pi gegenpruefen, nicht alle in dieser Sitzung erneut gelesen)
 
@@ -48,7 +53,8 @@ Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PER
 | tools/backup.sh | 5053f6b8a43a8638 | relBackup2 commit18b |
 | Restore-Werkzeug | c0e305b8ea4d9007 | relBackup commit18 |
 | health_check.py | 5a0156ff02d5960c | relHygiene commit19b |
-| prepper_docs.py | 609f0a7f00ab586b | relHygiene (Docs-Version seitdem nicht geaendert) |
+| prepper_docs.py | 41f34abc4cabeb5a | docsVer commit38 (29.10., bestaetigt; vorher 609f0a7f00ab586b) |
+| prepper_sdr.py | 8b887c795e64b87f | laut PATCH_STANDARD Live-Stand (seit sdrStick3e unveraendert) |
 | funk_health | f1b16a5f9bc7317c | relHygiene (aelterer Stand) |
 | mesh_hang_watchdog | 1518dbd9931c5e96 | relHygiene (aelterer Stand) |
 | lage_clock.py | sha256 beginnt c909aea1148518fe | relClock commit25 |
@@ -88,8 +94,12 @@ Hinweis: Wo "aelterer Stand" steht, kann ein spaeterer Patch die Datei veraender
 | **35** | clockOff | Zeit-Offset-Kachel aus chrony statt ntplib-Artefakt | 6bcd6aed89a8bc38c6169dd03b04470c8c0387c9 |
 | 36 | ninaFix | NINA-TLS: warnung.bund.de sendet kein Zwischenzertifikat; gepinnte Zwischenstelle Sectigo E36, kein verify=False | 5b9c1b48761bbc25995d090ae9dd34e85783dfb8 |
 | 37 | hideTexts | Lage-Seite: Zertifikatsketten-Hinweis (NINA-Fallback) und SDR-Rollentext (bc_note) ausgeblendet; Fehler und Ablauf unter 90 Tagen bleiben sichtbar, Hinweis weiter im Journal und unter /api/nina-cert | 0c41ed06127a138da3a227b94b4480240fdcc5e1 |
+| - | fullcheck.sh 2.0.1 | read-only Gesamtpruefung (Airspy per USB-Kennung, Stick-Namen nach Rolle, dmesg-Alter) | 7f6599346fb1394e71c0e4fe015b21825d770619 (2.0.0: b4bc2f19a61ba48060b349cc03e06ab7f00a0971) |
+| **38** | docsVer | Docs-Version: prepper_docs.py Generator-Version 2 (Uhr-Kachel-Text, NINA-Texte neutral) | b682f2ac7dcbedfa986f316ea0e5288cbb85a4bc |
+| **39** | relStop | REL-10 Teil 3: Zustaende beim Beenden sichern (SIGTERM-Haken vor longArchive, uplinkDetect force, Budget 4 s) | 32248b2dae03e58814c74a26c23a61320580a1ec |
+| **40** | asyncMini | async-Minifix: verwaister `<script>async</script>` auf der Lage-Seite entfernt | dd70db25d6819156c2af032e901ba713766b5dd7 |
 
-Fett = vom Auftrag "19b/22/27–35" erfasst.
+Fett = vom Auftrag "19b/22/27–35" erfasst, sowie die neuen Commits 38–40.
 
 ### dashboard.py auf Branch `kaeswasser-lage-monitor` (Repo Frankenland90/kaeswasser-lage-monitor)
 
@@ -104,21 +114,25 @@ Fett = vom Auftrag "19b/22/27–35" erfasst.
 | 35 | bd10e68dd1bb953ff74dceca6aba53a8de827d49 |
 | 36 | 9b9cd7e41c2c67efdbfa335a723a00b01ec54827 |
 | 37 | a9c4839496afe2a0e70eab1aa5e3f89bce1f6343 |
+| 38 docsVer (prepper_docs.py, Blob 63befa06) | 7d2f4d68c2fd6ca1d899c452a6564cfe51d46e7c |
+| 39 relStop (Blob 70e4d61d) | 39f667b66dfb6fe83b4580c469d6c980ef49677e |
+| 40 asyncMini (Blob 1d08a37e) | 66e2026e355bd154c0a3e10b1faa04b275e35757 |
 
 Aeltere Branch-Commits (secXml: lage_xml/database c7c27ed8…, requirements a2f411fa…, .gitignore 48a77020…, MOD-10-Aufraeumen archive/*, Audit-Doku eb48496f…): `git log` im Repo.
 
 ### Apply-Skripte (Groesse / sha256 der letzten drei)
 
-- apply-clockoff.sh (35): 61369 B, sha256 d23efde416a8fe4e03cfab8e0ecfd84cac24cce37f67f652f690e8cd005ae16b
-- apply-ninafix.sh (36): 95921 B, sha256 7331a9fb13032a10b87203864b23780a488e720b2f3279525c1f75813bd6c940
-- apply-hidetexts.sh (37): 57269 B, sha256 2cfe62af513bf809fa780ba8acea40f44e4e90892cf36c9763592c6bd2f3f42f
+- apply-docsver.sh (38): 50788 B, sha256 c1b0549ff7385040c9a8067c5500635f2a0733cbe0984158e2b2b347c567fd04
+- apply-relstop.sh (39): 41179 B, sha256 1667ff4a6affee7f15f2ecd18814d2ee7f47ff944b03f832f3feadb2dcdad957
+- apply-asyncmini.sh (40): 35404 B, sha256 2316fba9d9e471110ff80907e1adc5b2e783c5d1f3e1c6139026fc633a089add
 
-Aufruf je Patch: `bash /tmp/apply-<name>.sh commitNN dry-run` (erst Trockenlauf), dann ohne `dry-run`. Ein sudo-Prompt, nur der Dienst prepper-dashboard wird neu gestartet. wxSlot und clockOff stoppen mit klarer Meldung, wenn der Neustart in die Wetter-Slot-Zeit fallen wuerde (HH:55–HH:04 um 0,3,…,21 Uhr; HH:55–HH:59 der Slot-Stunden) – dann einfach nach der Zeit neu starten.
+Aufruf je Patch: `bash /tmp/apply-<name>.sh commitNN dry-run` (erst Trockenlauf), dann ohne `dry-run`. Ein sudo-Prompt, nur der Dienst prepper-dashboard wird neu gestartet. Ab commit39 gilt die Neustart-Sperre HH:55–HH:04 zu jeder Stunde (vorher nur um die Wetter-Slots 0,3,…,21 Uhr) – dann ab HH:05 neu starten.
 
 ## 4. Erledigte Audit-IDs (Patches veroeffentlicht)
 
 REL-01, REL-02 (30), REL-03 (18/18b), REL-04, REL-09 (19/19b), REL-05, REL-06 (25/25b), REL-07 (23), MOD-02 (20), MOD-04 Stufe 1 (22), MOD-08 (32), MOD-09 (28), MOD-10 (Repo-Aufraeumen, Branch-Commits), PERF-02 (29), PERF-03 Backup-Teil (18), PERF-05 (21), PERF-06 (23), SEC-01 Code-Seite (26), SEC-04, SEC-12 (26), SEC-05 (28), SEC-09/10/11 (24, 31x, 33), SEC-13 Teil: Chart.js lokal (19). SEC-02/SEC-03 (Laufzeitdaten/.gitignore) laut Branch-Commits behandelt – in dieser Sitzung nicht neu geprueft.
-Zusatz ohne Audit-ID: commit27 perfKeep, 31 dbVis, 31b mapUi, 34 wxSlot (Wetter-Slot, aus Pi-Journal), 35 clockOff (Uhr-Kachel), 36 ninaFix (NINA-TLS), 37 hideTexts (Lage-Texte).
+REL-10 Teil 3 (39 relStop, im Betrieb bestaetigt). INT-3 (toter scanner_mode_set-Altcode mit sudo systemctl) erledigt durch commit32 modDead; am Stand f8977a31 gibt es kein `sudo systemctl` mehr im Dashboard.
+Zusatz ohne Audit-ID: commit27 perfKeep, 31 dbVis, 31b mapUi, 34 wxSlot (Wetter-Slot, aus Pi-Journal), 35 clockOff (Uhr-Kachel), 36 ninaFix (NINA-TLS), 37 hideTexts (Lage-Texte), 38 docsVer (Docs-Version), 40 asyncMini (async-Minifix), fullcheck.sh 2.0.1 (read-only Pruefskript).
 
 ## 5. Bewusst offen (Entscheidung Frank)
 
@@ -128,22 +142,23 @@ SEC-01 (nur Code-Seite erledigt, Rest bewusst offen), SEC-06, SEC-08.
 
 - SEC-07; SEC-13 Rest
 - PERF-01, PERF-03 (Rest), PERF-04, PERF-07, PERF-08
-- REL-08, REL-10
-- MOD-01, MOD-03, MOD-05, MOD-06, MOD-07
-- async-Minifix, INT-3
-- Docs-Version: prepper_docs.py nennt noch "Stratum Offset (ntplib)" an 3 Stellen (~Zeilen 138/278/603). Ersatztext liegt in `/workspace/clockoff/DOCS_TEXT.md`.
-- ca. 250 alte `.bak`-Dateien im Projektordner (Patches behalten je 3 eigene Backups; Altbestand aufraeumen)
-- ca. 130 tote Zeilen in prepper_sdr.py
+- REL-08
+- REL-10 Teil 1 (Alarmfaeden und NINA/DWD-Sofortrunde vor dem ersten Voll-Update): braucht Freigabe von Frank. REL-10 Teil 2 (network-online.target nicht blockierend, Wait-Online-Zeitlimit): offen.
+- MOD-01, MOD-03, MOD-05, MOD-06, MOD-07 (Modul-Aufteilung, siehe Abschnitt 7)
+- Befund NameError `last_pegel_mesh_auto` (Pegel-Mesh-Pfad): Fix offen; Loesung sind drei Zeilen mit Startwert None. Bewusst getrennt von anderen Patches.
+- fullcheck.sh 2.0.1 meldet 84/100; ein Abzug ist ein Airspy-Fehlalarm, Korrektur als 2.0.2 geplant.
+- Aufraeumen (offen, Auftrag vom 30.10. abgebrochen): ca. 250 alte `.bak`-Dateien im Projektordner in ein datiertes Archiv verschieben (nicht loeschen); ca. 130 tote Zeilen in prepper_sdr.py (3 ueberdeckte Erstfassungen: stk_run_cmds, stk_test_stick, _at_start)
 - /pi-Antwortzeit: Median direkt nach den Neustarts fuer commit36/37 je 2,2 s (vorher 0,15-0,18 s); Nachmessung im eingeschwungenen Zustand steht aus. Bleibt sie hoch, gehoert das zu PERF-01.
 - gepinnte Zwischenstelle certs/sectigo-e36.pem: noch ca. 3434 Tage gueltig (Stand 26.10.); entfaellt, sobald warnung.bund.de die Kette wieder vollstaendig sendet.
-- root-eigenes `~ip` im venv (stoert pip; als root pruefen/entfernen)
+- root-eigenes `~ip` im venv (Rest eines abgebrochenen pip-Laufs, stoert pip; nur melden/als root pruefen, gehoert zum Aufraeumen)
 
 ## 7. Hinweise fuer den Wiedereinstieg
 
 - Arbeitsordner auf der Box: `/workspace/<patchname>` (`wxslot`, `clockoff`, `bridges`, `relclock`, …) mit `mk/` (Edits, Block, Konfig, apply-*.sh), `src2/` (Pruefprogramm `guard_*.py`), `sim/` (Simulationen), `testout/`. Werkzeuge: `/workspace/lib/mk_apply_dash.py` (Apply-Generator), `/workspace/lib/run_sim_dash.sh`, `/workspace/lib/chain_dash.sh`. Fortschritt: `/workspace/rel01/PROGRESS.md`. Standard: `/workspace/audit-run/PATCH_STANDARD.md`.
-- Naechster Patch baut auf dashboard.py `bb94f52af6e03c3b` (nach commit37) auf; Basis-Hash im Generator-Config (`cfg_*.py`) anpassen.
+- Naechster Patch baut auf dashboard.py `f8977a31bf4c177f` (nach commit40) auf; Basis-Hash im Generator-Config (`cfg_*.py`) anpassen. Marker-Pruefung: 19 Marker.
 - Simulationen nur auf Port 5093, immer nur eine gleichzeitig, keine Screenshots.
-- Empfohlene Reihenfolge nach der Pause: (1) auf der Pi pruefen, ob der Wetter-Slot (Wetter, Pegel, Heartbeat alle 3 h) ohne Luecke kam und die Kachel "Zeit-Offset" stimmt (curl -s http://127.0.0.1:5000/api/sysboot/status, Journal grep wxSlot); (2) kleine Fixes: Docs-Version (DOCS_TEXT.md), REL-10, async-Minifix, INT-3; (3) Aufraeumen (.bak, tote Zeilen, ~ip); (4) groessere Umbauten nur nach Freigabe.
+- Kleine Fixes Docs-Version, REL-10 Teil 3, async-Minifix und INT-3 sind erledigt (30.10.).
+- **Naechster Schritt (Entscheidung Frank 30.10.): Modul-Aufteilung**, damit kuenftige Patches kleiner werden (dashboard.py 26046 Zeilen, 1,3 MB). Erst Plan und Freigabe, dann ein kleiner Pilot-Schritt (eine Seitenvorlage in ein eigenes Modul), danach schrittweise weiter. Aufraeumen und Pegel-Fix folgen spaeter.
 - **Freigabe von Frank noetig vor:** PERF-01, MOD-05, MOD-06, MOD-07, PERF-03 (Rest), PERF-04.
 - Offene Beobachtung: fehlende Mesh-Meldungen werden vom anderen Worker untersucht (nicht Teil dieser Patches).
 
@@ -153,4 +168,5 @@ SEC-01 (nur Code-Seite erledigt, Rest bewusst offen), SEC-06, SEC-08.
 - Kein Eingriff in die Firewall.
 - Keine Secrets in Repos, Dateien oder Berichten.
 - Patch-Standard: strikter sha16-Basis-Check, Trockenlauf + idempotent, Backups `*.bak-<name>-JJJJMMTT-HHMMSS` (3 behalten), atomare Schreibvorgaenge, AST-Guard mit Mutationstest ohne node, py_compile mit System- und venv-Python, Sandbox-Selbsttests, nur betroffene Dienste neu starten, Smoke-Test aller 26 Seiten/APIs, Rollback mit klarer STOP-Meldung, ein sudo-Prompt, neue Docs-Version nur wenn prepper_docs.py im Umfang.
+- Hoechstens 4 Dateien pro Push. Neustart-Sperre HH:55–HH:04.
 - Sims nur auf Port 5093; Veroeffentlichung: prepper-patches (main) bekommt `apply-<name>.sh`, Branch kaeswasser-lage-monitor bekommt `dashboard.py`; danach Raw-Pruefung (cmp, sha256, bash -n) gegen den festgenagelten Commit.
