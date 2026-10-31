@@ -1,7 +1,7 @@
 # AUDIT-STAND – Prepper-Dashboard (BND-Prepper)
 
-Stand: Samstag 31.10.2026, 11:51 Uhr (Berlin), aktualisiert: commit47 speedAsync + Aufraeumen + fullcheck 2.0.2 angewendet (11:30), alle Pruefungen OK; REL-10 Teil 1 geplant (nicht gebaut). Keine Secrets in dieser Datei.
-Geschrieben vom Ausfuehrungs-Agenten (Grok Bot) fuer Frank. Vorige Fassung: 31.10. 09:00 (Blob 3084ab3f).
+Stand: Samstag 31.10.2026, 12:57 Uhr (Berlin), aktualisiert: REL-10 Teil 1 gemessen, nicht noetig (first_update_s 16,9 s), nicht gebaut; commit47 angewendet (11:30). Keine Secrets in dieser Datei.
+Geschrieben vom Ausfuehrungs-Agenten (Grok Bot) fuer Frank. Vorige Fassung: 31.10. 11:51 (Blob 3f964325).
 
 Host: BND-Prepper, Debian 13 aarch64, systemd 257, Python 3.13, Port 5000, Benutzer fmg, Projekt `/home/fmg/prepper-dashboard`, kein node auf der Pi.
 Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PERF-01..08, REL-01..10, MOD-01..10).
@@ -16,7 +16,7 @@ Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PER
 
   (erste 16 Zeichen je Datei mit dem Soll vergleichen).
 - commit47 angewendet 31.10. 11:30, alle Pruefungen OK: dashboard.py `74ac7bfd0eebd4e0` (22340 Zeilen, 26 Marker je 1x), lage_pages.py `1d33ae9fd78f53dc` (4496 Zeilen), prepper_sdr.py `0900bfe6ba67e657` (14126 Zeilen), fullcheck.sh 2.0.2 (`192f3b9b1c0f6418`). Smoke 26/26, nur prepper-dashboard neu gestartet (prepper-sdr nicht). /pi-Median 0,238 s direkt nach dem Neustart (vorher 0,200 s). Sicherungen `*.bak-commit47-20261031-112144`, Archiv `bak-archiv/20261031-112144` (4 Dateien, 3,2 MB, dazu der `~ip`-Rest).
-- fullcheck 2.0.2 danach: 98/100, 121 OK, 1 HINWEIS (Stick 2 hobby nicht am USB-Bus), 0 FEHLER; der Airspy-Fehlalarm aus 2.0.1 ist weg.
+- fullcheck 2.0.2 danach: 98/100, 121 OK, 1 HINWEIS (Stick 2 hobby laut fullcheck nicht am USB-Bus - laut Frank NICHT abgezogen, Hinweis wird untersucht), 0 FEHLER; der Airspy-Fehlalarm aus 2.0.1 ist weg.
 - commit46 perf03Cache angewendet 31.10. 07:31, alle Pruefungen OK, 25 Marker. Messung danach: /api/frequenz 0,009 s, /pegel 0,052 s (vorher 0,088 s / 0,489 s). Stand danach: dashboard.py `4594deab53d8ce7b` (22185 Zeilen), lage_pages.py `7f9fc0cf17d52644`, prepper_sdr.py `8b887c795e64b87f`, fullcheck.sh 2.0.1.
 - Davor bestaetigt (Frank-Ausgaben): bis einschliesslich commit45 (dashboard.py `d0f34851146d65b5`, 21941 Zeilen, 1126150 B; lage_pages.py `7f9fc0cf17d52644`, 4480 Zeilen, 204586 B; 24 Marker je 1x).
 - commit45 perfWsgi (PERF-01 Schritt B) angewendet 31.10. 05:42, alle Pruefungen OK. Backup `dashboard.py.bak-perfwsgi-20261031-053828`. Laufzeit: waitress 3.0.2, 8 Arbeitsfaeden, PID 46322, Faeden gesamt 27, unter 48 parallelen Anfragen fest. /pi-Median 0,196 s direkt nach dem Neustart, eingeschwungen 0,183-0,190 s (vorher unter Werkzeug 0,177 s).
@@ -198,9 +198,10 @@ SEC-01 (nur Code-Seite erledigt, Rest bewusst offen), SEC-06, SEC-08.
 - PERF-03 Punkt 3 (/mesh, /mesh2; laut Messung schnell, nur bei Bridge-Haenger relevant): offen, braucht Freigabe.
 - PERF-04, PERF-07, PERF-08
 - REL-08
-- REL-10 Teil 1 (NINA/DWD-Sofortrunde beim Start, vor dem ersten Voll-Update): Plan erstellt 31.10. (nicht gebaut), Entscheidungen von Frank offen. Befund am Stand 74ac7bfd: teil2/teil3/teil4 starten schon beim Laden (30/60/45 s), aber teil2 liest NINA aus data_store, den erst das erste Voll-Update fuellt; alarm_loop startet erst danach und ruft erst nach weiteren 300 s selbst ab. Vorher messen: `first_update_s` aus /api/sysboot/status. REL-10 Teil 2 (network-online.target nicht blockierend, Wait-Online-Zeitlimit): offen, eigener Patch im Bereich system (Drop-in), braucht Pi-Werte aus systemd-analyze.
+- REL-10 Teil 1 (NINA/DWD-Sofortrunde beim Start, vor dem ersten Voll-Update): gemessen, nicht noetig (first_update_s 16,9 s), nicht gebaut - Entscheidung Frank 31.10. Messung auf der Pi 31.10. 12:55 (/api/sysboot/status): first_update_s 16,9 s (unter der 30-s-Schwelle aus dem Plan), Alarm-Faden ok, NINA und DWD frisch, alle Faeden ok, Watchdog scharf, slow_n 2 (/pi 5,5 s, /luft 3,1 s, Einzelfaelle). Plan bleibt in der Sandbox (`/workspace/rel10/`), falls sich das Erst-Update spaeter deutlich verlaengert.
+- REL-10 Teil 2 (network-online.target nicht blockierend, Wait-Online-Zeitlimit): offen und freigabepflichtig; eigener Patch im Bereich system (Drop-in), braucht Pi-Werte aus systemd-analyze.
 - MOD-01, MOD-03, MOD-05; MOD-06, MOD-07 (Seitenvorlagen in Schritten 41-44 begonnen, Rest offen)
-- fullcheck 2.0.2 (seit 31.10. 11:30): 98/100; einziger HINWEIS: Stick 2 (hobby) nicht am USB-Bus - auf der Pi pruefen (Kabel/Hub), kein Code-Befund.
+- fullcheck 2.0.2 (seit 31.10. 11:30): 98/100; einziger HINWEIS: Stick 2 (hobby) nicht am USB-Bus. Laut Frank ist der Stick NICHT abgezogen - der Hinweis wird untersucht (moeglicher Fehlalarm der Erkennung; Seriennummern gehoeren nicht in dieses Repo).
 - Aufraeumen: erledigt mit commit47 (31.10. 11:30): Archiv `bak-archiv/20261031-112144` (4 Dateien, 3,2 MB; je Datei und Patch bleiben die 3 neuesten Sicherungen im Projektordner), 139 tote Zeilen in prepper_sdr.py entfernt (prepper-sdr laeuft bis zu seinem naechsten Neustart mit der gleichwertigen alten Fassung). Rueckweg: Dateien aus dem Archiv zurueckverschieben.
 - Befund am Rande: funk_health.py und funk_page.py machen `from dashboard import fetch_mesh_status`. Weil dashboard.py als Hauptprogramm laeuft, laedt das beim ersten Aufruf dashboard.py ein zweites Mal als Modul `dashboard`. Nicht geaendert, nur gemeldet.
 - gepinnte Zwischenstelle certs/sectigo-e36.pem: noch ca. 3434 Tage gueltig (Stand 26.10.); entfaellt, sobald warnung.bund.de die Kette wieder vollstaendig sendet.
@@ -209,11 +210,11 @@ SEC-01 (nur Code-Seite erledigt, Rest bewusst offen), SEC-06, SEC-08.
 ## 7. Hinweise fuer den Wiedereinstieg
 
 - Arbeitsordner auf der Box: `/workspace/<patchname>` (`wxslot`, `clockoff`, `bridges`, `relclock`, …) mit `mk/` (Edits, Block, Konfig, apply-*.sh), `src2/` (Pruefprogramm `guard_*.py`), `sim/` (Simulationen), `testout/`. Werkzeuge: `/workspace/lib/mk_apply_dash.py` (Apply-Generator), `/workspace/lib/run_sim_dash.sh`, `/workspace/lib/chain_dash.sh`. Fortschritt: `/workspace/rel01/PROGRESS.md`. Standard: `/workspace/audit-run/PATCH_STANDARD.md`.
-- Naechster Patch (commit48) baut auf dem bestaetigten Pi-Stand auf: dashboard.py `74ac7bfd0eebd4e0`, lage_pages.py `1d33ae9fd78f53dc`, prepper_sdr.py `0900bfe6ba67e657`, fullcheck.sh 2.0.2 `192f3b9b1c0f6418`; Marker-Pruefung: 26 Marker (mit speedAsync). Werkzeuge commit47: `/workspace/commit47/` (mk/, sim/chain_c47.sh, fc2/). Plan REL-10 Teil 1: `/workspace/rel10/`. Werkzeuge perf03Cache: `/workspace/perf03cache/`. Werkzeuge fuer weitere Seitenvorlagen: `/workspace/lib/pages/`.
+- Naechster Patch (commit48) baut auf dem bestaetigten Pi-Stand auf: dashboard.py `74ac7bfd0eebd4e0`, lage_pages.py `1d33ae9fd78f53dc`, prepper_sdr.py `0900bfe6ba67e657`, fullcheck.sh 2.0.2 `192f3b9b1c0f6418`; Marker-Pruefung: 26 Marker (mit speedAsync). Werkzeuge commit47: `/workspace/commit47/` (mk/, sim/chain_c47.sh, fc2/). Plan REL-10 Teil 1 (nicht gebaut): `/workspace/rel10/`. Werkzeuge perf03Cache: `/workspace/perf03cache/`. Werkzeuge fuer weitere Seitenvorlagen: `/workspace/lib/pages/`.
 - Simulationen nur auf Port 5093, immer nur eine gleichzeitig, keine Screenshots.
 - Kleine Fixes Docs-Version, REL-10 Teil 3, async-Minifix und INT-3 sind erledigt (30.10.).
 - Modul-Aufteilung laeuft (commit41-44: 13 Seitenvorlagen, dashboard.py von 26046 auf 21790 Zeilen). Aufraeumen in commit47. PERF-01 erledigt (commit45 perfWsgi angewendet 31.10. 05:42).
-- **Freigabe von Frank noetig vor:** REL-10 Teil 1 (Entscheidungen aus dem Plan), MOD-05, MOD-06, MOD-07, PERF-03 Punkt 3, PERF-04.
+- **Freigabe von Frank noetig vor:** REL-10 Teil 2, MOD-05, MOD-06, MOD-07, PERF-03 Punkt 3, PERF-04.
 - Offene Beobachtung: fehlende Mesh-Meldungen werden vom anderen Worker untersucht (nicht Teil dieser Patches).
 
 ## 8. Dauerregeln
