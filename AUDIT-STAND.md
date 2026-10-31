@@ -1,7 +1,7 @@
 # AUDIT-STAND – Prepper-Dashboard (BND-Prepper)
 
-Stand: Samstag 31.10.2026, 07:20 Uhr (Berlin), aktualisiert: commit46 perf03Cache (PERF-03 Rest Punkt 1+2) veroeffentlicht, noch nicht angewendet. Keine Secrets in dieser Datei.
-Geschrieben vom Ausfuehrungs-Agenten (Grok Bot) fuer Frank. Vorige Fassung: 30.10. 23:30 (Blob c50ab411).
+Stand: Samstag 31.10.2026, 09:00 Uhr (Berlin), aktualisiert: commit46 angewendet (07:31); commit47 speedAsync + Aufraeumen + fullcheck 2.0.2 veroeffentlicht, noch nicht angewendet. Keine Secrets in dieser Datei.
+Geschrieben vom Ausfuehrungs-Agenten (Grok Bot) fuer Frank. Vorige Fassung: 31.10. 07:20 (Blob 63454d31).
 
 Host: BND-Prepper, Debian 13 aarch64, systemd 257, Python 3.13, Port 5000, Benutzer fmg, Projekt `/home/fmg/prepper-dashboard`, kein node auf der Pi.
 Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PERF-01..08, REL-01..10, MOD-01..10).
@@ -15,7 +15,8 @@ Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PER
   Nur die zwei Hauptdateien, ohne Pipe: `sha256sum /home/fmg/prepper-dashboard/dashboard.py /home/fmg/prepper-dashboard/lage_pages.py`
 
   (erste 16 Zeichen je Datei mit dem Soll vergleichen).
-- Bestaetigt angewendet auf der Pi (Frank-Ausgaben): bis einschliesslich commit45 (dashboard.py `d0f34851146d65b5`, 21941 Zeilen, 1126150 B; lage_pages.py `7f9fc0cf17d52644`, 4480 Zeilen, 204586 B; 24 Marker je 1x).
+- commit46 perf03Cache angewendet 31.10. 07:31, alle Pruefungen OK, 25 Marker. Messung danach: /api/frequenz 0,009 s, /pegel 0,052 s (vorher 0,088 s / 0,489 s). Bestaetigter Pi-Stand: dashboard.py `4594deab53d8ce7b` (22185 Zeilen), lage_pages.py `7f9fc0cf17d52644`, prepper_sdr.py `8b887c795e64b87f`, fullcheck.sh 2.0.1.
+- Davor bestaetigt (Frank-Ausgaben): bis einschliesslich commit45 (dashboard.py `d0f34851146d65b5`, 21941 Zeilen, 1126150 B; lage_pages.py `7f9fc0cf17d52644`, 4480 Zeilen, 204586 B; 24 Marker je 1x).
 - commit45 perfWsgi (PERF-01 Schritt B) angewendet 31.10. 05:42, alle Pruefungen OK. Backup `dashboard.py.bak-perfwsgi-20261031-053828`. Laufzeit: waitress 3.0.2, 8 Arbeitsfaeden, PID 46322, Faeden gesamt 27, unter 48 parallelen Anfragen fest. /pi-Median 0,196 s direkt nach dem Neustart, eingeschwungen 0,183-0,190 s (vorher unter Werkzeug 0,177 s).
 - Davor bis commit44 (dashboard.py `1898fde2aa91d066`, 21790 Zeilen, 1118288 B; 23 Marker): commit41 30.10. 19:42, commit42 30.10. 20:45, commit43 30.10. 22:08, commit44 30.10. 23:08, je alle Pruefungen OK.
 - commit45a pipWaitress (PERF-01 Schritt A) angewendet (Rueckmeldung 31.10. 00:13): waitress 3.0.2 im venv bestaetigt (fmg:fmg; `~ip` im venv ist fmg:fmg). Kein Neustart, dashboard.py unveraendert.
@@ -23,7 +24,7 @@ Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PER
 - pegelFix (commit44) im Betrieb: Journal `pegelSplit aktiv: ... pegelFix: 3 Namen da`.
 - Aeltere Bestaetigungen: commit34 25.10. 20:36, commit35 25.10. 20:42, commit36 26.10. ~18:23, commit37 26.10. ~19:05.
 - relStop (commit39) im Betrieb bestaetigt: beim Neustart am 30.10. um 06:40:18 stand im Journal `relStop SIGTERM: uplinkDetect uplink_state.json gespeichert` und `fertig in 0.01 s`.
-- Veroeffentlicht, noch nicht angewendet: commit46 perf03Cache (Basis d0f34851146d65b5 -> 4594deab53d8ce7b). Jeder Patch prueft die Basis per sha16 und stoppt sonst mit klarer Meldung.
+- Veroeffentlicht, noch nicht angewendet: commit47 (dashboard.py 4594deab53d8ce7b -> 74ac7bfd0eebd4e0, lage_pages.py 7f9fc0cf17d52644 -> 1d33ae9fd78f53dc, prepper_sdr.py 8b887c795e64b87f -> 0900bfe6ba67e657, fullcheck.sh 2.0.1 -> 2.0.2). Jeder Patch prueft die Basis per sha16 und stoppt sonst mit klarer Meldung.
 
 ## 2. Pi-Stand (sha16 = erste 16 Hex-Zeichen von sha256)
 
@@ -47,8 +48,9 @@ Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PER
 | commit42 pagesSplit2 | 6661a7f77b1e1487 (23683 Zeilen) |
 | commit43 pagesSplit3 | 64a83af070677323 (21976 Zeilen) |
 | commit44 pegelSplit | 1898fde2aa91d066 (30.10. 23:08 angewendet), 21790 Zeilen (Blob 891fd04f) |
-| commit45 perfWsgi | **d0f34851146d65b5** <- bestaetigter Pi-Stand (31.10. 05:42), 21941 Zeilen, 1126150 B (Blob 223c51f4) |
-| commit46 perf03Cache | 4594deab53d8ce7b (22185 Zeilen, 1137546 B, Blob 3697430b) <- Ziel, veroeffentlicht, auf der Pi noch nicht angewendet |
+| commit45 perfWsgi | d0f34851146d65b5 (31.10. 05:42), 21941 Zeilen, 1126150 B (Blob 223c51f4) |
+| commit46 perf03Cache | **4594deab53d8ce7b** <- bestaetigter Pi-Stand (31.10. 07:31), 22185 Zeilen, 1137546 B (Blob 3697430b) |
+| commit47 speedAsync | 74ac7bfd0eebd4e0 (22340 Zeilen, 1145572 B, Blob 7873cc17) <- Ziel, veroeffentlicht, noch nicht angewendet |
 
 ### lage_pages.py (neu seit commit41: Seitenvorlagen aus dashboard.py, nur Text)
 
@@ -58,8 +60,9 @@ Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PER
 | commit42 pagesSplit2 | 6a596584014df095 (2471 Zeilen) | + PAGE4, PAGE_SPEICHER, PAGE_UMWELT2, PAGE_PI, PAGE_MESH, PAGE_NEWS, PAGE_LUFT |
 | commit43 pagesSplit3 | 231d4c309c1ae009 (4241 Zeilen) | + PAGE1, PAGE2, PAGE3, PAGE_LOKALE_ENERGIE |
 | commit44 pegelSplit | **7f9fc0cf17d52644** (4480 Zeilen) <- Pi-Stand, Branch-Blob 1f38c694 | + PAGE_PEGEL |
+| commit47 speedAsync | 1d33ae9fd78f53dc (4496 Zeilen, 205198 B, Blob f4e8129c) <- Ziel | measureDownload in PAGE_PI: 202 + Abfrage /api/speedtest |
 
-Marker in dashboard.py (je genau 1x): relHygiene, perfKeep, sameOrigin, alarmFaden, relWatch, dbVis, mapUi, modDead, secXmlDash, wxSlot, meshBootQuiet, funkHarden2, kartevec, clockOff, ninaFix, hideTexts, longArchive, relStop, asyncMini, pagesSplit1, pagesSplit2, pagesSplit3, pegelSplit, perfWsgi (24; perfWsgi seit commit45); nach commit46 zusaetzlich perf03Cache (25).
+Marker in dashboard.py (je genau 1x): relHygiene, perfKeep, sameOrigin, alarmFaden, relWatch, dbVis, mapUi, modDead, secXmlDash, wxSlot, meshBootQuiet, funkHarden2, kartevec, clockOff, ninaFix, hideTexts, longArchive, relStop, asyncMini, pagesSplit1, pagesSplit2, pagesSplit3, pegelSplit, perfWsgi (24; perfWsgi seit commit45); nach commit46 zusaetzlich perf03Cache (25); nach commit47 zusaetzlich speedAsync (26).
 
 ### weitere Dateien (Soll laut Apply-Skripten; auf der Pi gegenpruefen, nicht alle in dieser Sitzung erneut gelesen)
 
@@ -76,7 +79,7 @@ Marker in dashboard.py (je genau 1x): relHygiene, perfKeep, sameOrigin, alarmFad
 | Restore-Werkzeug | c0e305b8ea4d9007 | relBackup commit18 |
 | health_check.py | 5a0156ff02d5960c | relHygiene commit19b |
 | prepper_docs.py | 41f34abc4cabeb5a | docsVer commit38 (29.10., bestaetigt; vorher 609f0a7f00ab586b) |
-| prepper_sdr.py | 8b887c795e64b87f | laut PATCH_STANDARD Live-Stand (seit sdrStick3e unveraendert) |
+| prepper_sdr.py | 8b887c795e64b87f (14265 Zeilen); nach commit47 0900bfe6ba67e657 (14126 Zeilen, Blob 61c6fb87) | seit sdrStick3e unveraendert; commit47 entfernt 3 ueberdeckte Erstfassungen (139 Zeilen) |
 | funk_health | f1b16a5f9bc7317c | relHygiene (aelterer Stand) |
 | mesh_hang_watchdog | 1518dbd9931c5e96 | relHygiene (aelterer Stand) |
 | lage_clock.py | sha256 beginnt c909aea1148518fe | relClock commit25 |
@@ -127,6 +130,7 @@ Hinweis: Wo "aelterer Stand" steht, kann ein spaeterer Patch die Datei veraender
 | **45a** | pipWaitress | PERF-01 Schritt A: waitress 3.0.2 offline ins venv (eingebettetes Wheel, require-hashes) | 2b4f0d616f47f0875f2f521cf2255a4b191dd8d8 |
 | **45** | perfWsgi | PERF-01 Schritt B: waitress statt Werkzeug-Entwicklungsserver (8 Faeden, ein Prozess) | 4c36ef9a80381c18a58be79f6b6c42804dd80652 |
 | **46** | perf03Cache | PERF-03 Rest Punkt 1+2: /api/frequenz aus data_store, /pegel Stale-While-Revalidate | 240280cdf0624bf7a288c389e10b78eaaab48f49 |
+| **47** | speedAsync + Aufraeumen + fullcheck 2.0.2 | PERF-03 Punkt 4 (Download-/Speedtest ohne Blockieren), .bak-Archiv, tote Zeilen prepper_sdr.py, ~ip-Rest, fullcheck Airspy-Seriennummer | 2448473c709e3909c87d021f3bd78000d60c4390 (apply-commit47.sh + fullcheck.sh 2.0.2) |
 
 Fett = vom Auftrag "19b/22/27–35" erfasst, sowie die neuen Commits 38–44.
 
@@ -152,6 +156,7 @@ Fett = vom Auftrag "19b/22/27–35" erfasst, sowie die neuen Commits 38–44.
 | 44 pegelSplit (Blobs 891fd04f / 1f38c694) | bda993cbc77ee1f91e5a8ea26d47572b252f9d36 |
 | 45 perfWsgi (dashboard.py Blob 223c51f4; lage_pages.py unveraendert) | a48c0483c93efde09b816c7090161b4659286b4a |
 | 46 perf03Cache (dashboard.py Blob 3697430b; lage_pages.py unveraendert) | c3c11ecebcb1bab263a1a6f3cf626d206643da0a |
+| 47 speedAsync (Blobs dashboard.py 7873cc17 / lage_pages.py f4e8129c / prepper_sdr.py 61c6fb87) | 5b533749294682a96833d35eab5a065cd515e62a |
 
 Aeltere Branch-Commits (secXml: lage_xml/database c7c27ed8…, requirements a2f411fa…, .gitignore 48a77020…, MOD-10-Aufraeumen archive/*, Audit-Doku eb48496f…): `git log` im Repo.
 
@@ -163,6 +168,7 @@ Aeltere Branch-Commits (secXml: lage_xml/database c7c27ed8…, requirements a2f4
 - apply-pegelsplit.sh (44): 58782 B, sha256 d35ca97206613e336d7d9d30fcb012175c620a2631aa209b5c8ace45e8ad8d43
 - apply-pipwaitress.sh (45a): 82984 B, sha256 d218e9b67652d9c53760673c8d2e2d5d40966c3b58d11207564f9a901d7641f3
 - apply-perfwsgi.sh (45): 62882 B, sha256 60fd2672b0ffb0d4b9f1a8094616454e4a0c487caa1ac9ac7e4727f5fbf74860 (STOP, wenn waitress 3.0.2 nicht im venv ist)
+- apply-commit47.sh (47): 189089 B, sha256 d4fae93cf10980aae09e263b7e4b87fae3266c970813ac4e216b690688a7b157 (STOP bei Mischstand oder fremder Basis einer der drei Dateien, perfWsgi nicht aktiv, Neustart-Sperre; Aufruf `bash /tmp/apply-commit47.sh commit47`, Trockenlauf mit `dry-run`)
 - apply-perf03cache.sh (46): 66535 B, sha256 4c2a279431b4a59da7ccd57f40e4f950b4a67976f69b58e619942ee15a40fee0 (STOP bei fremder Basis, lage_pages.py ungleich 7f9fc0cf17d52644, perfWsgi nicht aktiv, Neustart-Sperre)
 
 - apply-docsver.sh (38): 50788 B, sha256 c1b0549ff7385040c9a8067c5500635f2a0733cbe0984158e2b2b347c567fd04
@@ -177,7 +183,8 @@ REL-01, REL-02 (30), REL-03 (18/18b), REL-04, REL-09 (19/19b), REL-05, REL-06 (2
 REL-10 Teil 3 (39 relStop, im Betrieb bestaetigt). INT-3 (toter scanner_mode_set-Altcode mit sudo systemctl) erledigt durch commit32 modDead; am Stand f8977a31 gibt es kein `sudo systemctl` mehr im Dashboard.
 PERF-01 (45a/45, angewendet 31.10. 00:13 bzw. 05:42): waitress 3.0.2, 8 Arbeitsfaeden, ein Prozess, Bind 0.0.0.0:5000, Unit unveraendert. Messung nach dem Einspielen: Faeden gesamt 27, unter 48 parallelen Anfragen fest; /pi-Median 0,196 s direkt nach dem Neustart, eingeschwungen 0,183-0,190 s (Werkzeug vorher 0,177 s; kein Gewinn bei Einzelanfragen erwartet, Ziel war feste Fadenzahl und Produktions-Server). Restrisiko: mehr als 8 gleichzeitig lange Anfragen stauen sich; dauert das 180 s, startet relWatch neu (betrifft PERF-03 Rest).
 MOD-06/07 teilweise: 13 Seitenvorlagen in lage_pages.py (41-44), weitere Vorlagen und Code-Module offen. Befund NameError `last_pegel_mesh_auto` behoben (44 pegelFix; Sim-Nachweis: eine Pegel-Meldung pro Wetter-Slot wie vorher, keine zusaetzliche Sendung).
-Zusatz ohne Audit-ID: commit27 perfKeep, 31 dbVis, 31b mapUi, 34 wxSlot (Wetter-Slot, aus Pi-Journal), 35 clockOff (Uhr-Kachel), 36 ninaFix (NINA-TLS), 37 hideTexts (Lage-Texte), 38 docsVer (Docs-Version), 40 asyncMini (async-Minifix), fullcheck.sh 2.0.1 (read-only Pruefskript).
+Zusatz ohne Audit-ID: commit27 perfKeep, 31 dbVis, 31b mapUi, 34 wxSlot (Wetter-Slot, aus Pi-Journal), 35 clockOff (Uhr-Kachel), 36 ninaFix (NINA-TLS), 37 hideTexts (Lage-Texte), 38 docsVer (Docs-Version), 40 asyncMini (async-Minifix), fullcheck.sh 2.0.1/2.0.2 (read-only Pruefskript), 47 Aufraeumen (.bak-Archiv, tote Zeilen prepper_sdr.py, ~ip-Rest).
+PERF-03 vollstaendig bis auf Punkt 3: Punkt 1+2 (46, angewendet 31.10. 07:31), Punkt 4 (47 speedAsync, veroeffentlicht): /api/download_test und POST /api/speedtest?wait=1 starten die Messung im Hintergrund und antworten sofort mit 202 + Abfrage ueber /api/speedtest; Ergebnis der letzten 5 min direkt wie bisher; /api/backup/restore unveraendert.
 
 ## 5. Bewusst offen (Entscheidung Frank)
 
@@ -186,25 +193,25 @@ SEC-01 (nur Code-Seite erledigt, Rest bewusst offen), SEC-06, SEC-08.
 ## 6. Noch offen
 
 - SEC-07; SEC-13 Rest
-- PERF-03 (Rest): Punkt 1+2 als commit46 perf03Cache veroeffentlicht (Freigabe Frank 31.10.), Anwendung steht aus (erst dry-run, Neustart-Sperre HH:55-HH:04). Inhalt: ein Block vor __main__, keine geaenderte Zeile; /api/frequenz aus data_store, wenn hoechstens 60 s alt, sonst genau ein Live-Abruf mit Sperre (Wartende bekommen dessen Ergebnis, nach 8 s alter Wert mit kept); /pegel bis 10 min alt sofort, aelter -> alter Stand mit staleTs-Farbe und genau ein Hintergrund-Abruf (Faden perf03Pegel, nach Fehler 60 s Pause; keepLast-Ersatzwert zaehlt als Fehler, alter Stempel bleibt), ohne Seitendaten direkt wie bisher. freq_loop, maybe_mesh_frequenz, maybe_mesh_pegel, build_mesh_pegel_text unveraendert; neu nur lesend /api/perf03cache/status. Pi vorher: /pegel 0,489 s, /api/frequenz 0,088 s, /mesh 0,096 s, /mesh2 0,097 s. Sim: /pegel bei gkd-Ausfall 8 ms (vorher 50 s), /api/frequenz 1,3 ms ohne Quellabruf, je 1 Hintergrund- bzw. Live-Abruf gleichzeitig, keine Mesh-Sendung. Offen danach: Punkt 3 /mesh und /mesh2 (laut Messung schnell, nur bei Bridge-Haenger relevant), Punkt 4 lange Anfragen /api/download_test und /api/speedtest?wait=1. Erledigt davon schon: Backup-Teil (18), /pi-Ping (27 perfKeep), GET /api/mesh_weather sendet nicht mehr.
+- PERF-03 Punkt 3 (/mesh, /mesh2; laut Messung schnell, nur bei Bridge-Haenger relevant): offen, braucht Freigabe.
 - PERF-04, PERF-07, PERF-08
 - REL-08
 - REL-10 Teil 1 (Alarmfaeden und NINA/DWD-Sofortrunde vor dem ersten Voll-Update): braucht Freigabe von Frank. REL-10 Teil 2 (network-online.target nicht blockierend, Wait-Online-Zeitlimit): offen.
 - MOD-01, MOD-03, MOD-05; MOD-06, MOD-07 (Seitenvorlagen in Schritten 41-44 begonnen, Rest offen)
-- fullcheck.sh 2.0.1 meldet 84/100; ein Abzug ist ein Airspy-Fehlalarm, Korrektur als 2.0.2 geplant.
-- Aufraeumen (offen, Auftrag vom 30.10. abgebrochen): ca. 250 alte `.bak`-Dateien im Projektordner in ein datiertes Archiv verschieben (nicht loeschen); ca. 130 tote Zeilen in prepper_sdr.py (3 ueberdeckte Erstfassungen: stk_run_cmds, stk_test_stick, _at_start)
+- fullcheck.sh 2.0.1 meldet 84/100; ein Abzug ist ein Airspy-Fehlalarm (Seriennummer mit Praefix). Korrektur 2.0.2 in commit47 (wird mit installiert, Sicherung der alten Fassung); Wert nach dem Einspielen von Frank melden lassen.
+- Aufraeumen: in commit47 enthalten (veroeffentlicht, noch nicht angewendet): alte `.bak`-Dateien im Projektordner (nur oberste Ebene) nach `bak-archiv/<Zeit>/` verschieben, je Datei und Patch-Name bleiben die 3 neuesten; 139 tote Zeilen in prepper_sdr.py (stk_run_cmds, stk_test_stick, _at_start Erstfassungen) entfernt, prepper-sdr wird dafuer nicht neu gestartet (Code war unerreichbar; der laufende Dienst behaelt die alte, gleichwertige Fassung bis zum naechsten Neustart).
 - Befund am Rande: funk_health.py und funk_page.py machen `from dashboard import fetch_mesh_status`. Weil dashboard.py als Hauptprogramm laeuft, laedt das beim ersten Aufruf dashboard.py ein zweites Mal als Modul `dashboard`. Nicht geaendert, nur gemeldet.
 - gepinnte Zwischenstelle certs/sectigo-e36.pem: noch ca. 3434 Tage gueltig (Stand 26.10.); entfaellt, sobald warnung.bund.de die Kette wieder vollstaendig sendet.
-- `~ip` im venv (Rest eines abgebrochenen pip-Laufs): laut Frank 31.10. fmg:fmg, nicht mehr root; Entfernen gehoert zum Aufraeumen
+- `~ip` im venv: commit47 verschiebt den Rest ins Archiv `bak-archiv/<Zeit>/venv-rest/` (nur wenn pip daneben liegt und kein Symlink).
 
 ## 7. Hinweise fuer den Wiedereinstieg
 
 - Arbeitsordner auf der Box: `/workspace/<patchname>` (`wxslot`, `clockoff`, `bridges`, `relclock`, …) mit `mk/` (Edits, Block, Konfig, apply-*.sh), `src2/` (Pruefprogramm `guard_*.py`), `sim/` (Simulationen), `testout/`. Werkzeuge: `/workspace/lib/mk_apply_dash.py` (Apply-Generator), `/workspace/lib/run_sim_dash.sh`, `/workspace/lib/chain_dash.sh`. Fortschritt: `/workspace/rel01/PROGRESS.md`. Standard: `/workspace/audit-run/PATCH_STANDARD.md`.
-- Naechster Patch (commit47) baut nach Anwendung von commit46 auf dashboard.py `4594deab53d8ce7b` und lage_pages.py `7f9fc0cf17d52644` auf (vorher `d0f34851146d65b5`); beide im Basis-Check. Marker-Pruefung: 25 Marker (mit perf03Cache). Werkzeuge perf03Cache: `/workspace/perf03cache/` (mk/, sim/pcprobe.sh alt|neu mit gefaelschter gkd-/Frequenzquelle, sim/chain_pc.sh). Werkzeuge perfWsgi: `/workspace/perfwsgi/` (mk/, sim/hw.sh fuer Faden-/Watchdog-/SIGTERM-Sim). Werkzeuge fuer weitere Seitenvorlagen: `/workspace/lib/pages/` (README.md; Namensliste reicht; Zusatzzeilen und spaetere `NAME = NAME.replace(...)`-Schichten werden unterstuetzt).
+- Naechster Patch (commit48) baut nach Anwendung von commit47 auf dashboard.py `74ac7bfd0eebd4e0`, lage_pages.py `1d33ae9fd78f53dc` und prepper_sdr.py `0900bfe6ba67e657` auf; Marker-Pruefung: 26 Marker (mit speedAsync). Werkzeuge commit47: `/workspace/commit47/` (mk/ mit blk_sa.py, guard_sa.py, deadsdr.py, bakarch.py, mk_fc.py, build_c47.py; sim/chain_c47.sh; fc2/ fullcheck-Tests). Werkzeuge perf03Cache: `/workspace/perf03cache/`. Werkzeuge fuer weitere Seitenvorlagen: `/workspace/lib/pages/`.
 - Simulationen nur auf Port 5093, immer nur eine gleichzeitig, keine Screenshots.
 - Kleine Fixes Docs-Version, REL-10 Teil 3, async-Minifix und INT-3 sind erledigt (30.10.).
-- Modul-Aufteilung laeuft (commit41-44: 13 Seitenvorlagen, dashboard.py von 26046 auf 21790 Zeilen). Aufraeumen folgt spaeter. PERF-01 erledigt (commit45 perfWsgi angewendet 31.10. 05:42).
-- **Freigabe von Frank noetig vor:** MOD-05, MOD-06, MOD-07, PERF-03 (Rest ab Punkt 3), PERF-04.
+- Modul-Aufteilung laeuft (commit41-44: 13 Seitenvorlagen, dashboard.py von 26046 auf 21790 Zeilen). Aufraeumen in commit47. PERF-01 erledigt (commit45 perfWsgi angewendet 31.10. 05:42).
+- **Freigabe von Frank noetig vor:** MOD-05, MOD-06, MOD-07, PERF-03 Punkt 3, PERF-04.
 - Offene Beobachtung: fehlende Mesh-Meldungen werden vom anderen Worker untersucht (nicht Teil dieser Patches).
 
 ## 8. Dauerregeln
