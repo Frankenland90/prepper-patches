@@ -1,6 +1,6 @@
 # AUDIT-STAND – Prepper-Dashboard (BND-Prepper)
 
-Stand: Samstag 31.10.2026, 00:22 Uhr (Berlin), aktualisiert fuer PERF-01: commit45a pipWaitress angewendet, commit45 perfWsgi veroeffentlicht (noch nicht angewendet). Keine Secrets in dieser Datei.
+Stand: Samstag 31.10.2026, 05:50 Uhr (Berlin), aktualisiert: commit45a pipWaitress und commit45 perfWsgi angewendet, PERF-01 erledigt; naechstes Thema PERF-03 (Rest), in Planung. Keine Secrets in dieser Datei.
 Geschrieben vom Ausfuehrungs-Agenten (Grok Bot) fuer Frank. Vorige Fassung: 30.10. 23:30 (Blob c50ab411).
 
 Host: BND-Prepper, Debian 13 aarch64, systemd 257, Python 3.13, Port 5000, Benutzer fmg, Projekt `/home/fmg/prepper-dashboard`, kein node auf der Pi.
@@ -15,7 +15,9 @@ Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PER
   Nur die zwei Hauptdateien, ohne Pipe: `sha256sum /home/fmg/prepper-dashboard/dashboard.py /home/fmg/prepper-dashboard/lage_pages.py`
 
   (erste 16 Zeichen je Datei mit dem Soll vergleichen).
-- Bestaetigt angewendet auf der Pi (Frank-Ausgaben): bis einschliesslich commit44 (dashboard.py `1898fde2aa91d066`, 21790 Zeilen, 1118288 B; lage_pages.py `7f9fc0cf17d52644`, 4480 Zeilen, 204586 B; 23 Marker je 1x). commit41 30.10. 19:42, commit42 30.10. 20:45, commit43 30.10. 22:08, commit44 30.10. 23:08, je alle Pruefungen OK.
+- Bestaetigt angewendet auf der Pi (Frank-Ausgaben): bis einschliesslich commit45 (dashboard.py `d0f34851146d65b5`, 21941 Zeilen, 1126150 B; lage_pages.py `7f9fc0cf17d52644`, 4480 Zeilen, 204586 B; 24 Marker je 1x).
+- commit45 perfWsgi (PERF-01 Schritt B) angewendet 31.10. 05:42, alle Pruefungen OK. Backup `dashboard.py.bak-perfwsgi-20261031-053828`. Laufzeit: waitress 3.0.2, 8 Arbeitsfaeden, PID 46322, Faeden gesamt 27, unter 48 parallelen Anfragen fest. /pi-Median 0,196 s direkt nach dem Neustart, eingeschwungen 0,183-0,190 s (vorher unter Werkzeug 0,177 s).
+- Davor bis commit44 (dashboard.py `1898fde2aa91d066`, 21790 Zeilen, 1118288 B; 23 Marker): commit41 30.10. 19:42, commit42 30.10. 20:45, commit43 30.10. 22:08, commit44 30.10. 23:08, je alle Pruefungen OK.
 - commit45a pipWaitress (PERF-01 Schritt A) angewendet (Rueckmeldung 31.10. 00:13): waitress 3.0.2 im venv bestaetigt (fmg:fmg; `~ip` im venv ist fmg:fmg). Kein Neustart, dashboard.py unveraendert.
 - Davor: commit38 29.10. 22:33, commit39 29.10. 23:24, commit40 30.10. 06:36 (dashboard.py `f8977a31bf4c177f`, 26046 Zeilen).
 - pegelFix (commit44) im Betrieb: Journal `pegelSplit aktiv: ... pegelFix: 3 Namen da`.
@@ -44,8 +46,8 @@ Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PER
 | commit41 pagesSplit1 | 7ffa9d33c5fd4974 (25718 Zeilen) |
 | commit42 pagesSplit2 | 6661a7f77b1e1487 (23683 Zeilen) |
 | commit43 pagesSplit3 | 64a83af070677323 (21976 Zeilen) |
-| commit44 pegelSplit | **1898fde2aa91d066** <- bestaetigter Pi-Stand (30.10. 23:08), 21790 Zeilen (Blob 891fd04f) |
-| commit45 perfWsgi | d0f34851146d65b5 (21941 Zeilen, 1126150 B, Blob 223c51f4) <- Ziel, veroeffentlicht, auf der Pi noch nicht angewendet |
+| commit44 pegelSplit | 1898fde2aa91d066 (30.10. 23:08 angewendet), 21790 Zeilen (Blob 891fd04f) |
+| commit45 perfWsgi | **d0f34851146d65b5** <- bestaetigter Pi-Stand (31.10. 05:42), 21941 Zeilen, 1126150 B (Blob 223c51f4) |
 
 ### lage_pages.py (neu seit commit41: Seitenvorlagen aus dashboard.py, nur Text)
 
@@ -56,7 +58,7 @@ Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PER
 | commit43 pagesSplit3 | 231d4c309c1ae009 (4241 Zeilen) | + PAGE1, PAGE2, PAGE3, PAGE_LOKALE_ENERGIE |
 | commit44 pegelSplit | **7f9fc0cf17d52644** (4480 Zeilen) <- Pi-Stand, Branch-Blob 1f38c694 | + PAGE_PEGEL |
 
-Marker in dashboard.py (je genau 1x): relHygiene, perfKeep, sameOrigin, alarmFaden, relWatch, dbVis, mapUi, modDead, secXmlDash, wxSlot, meshBootQuiet, funkHarden2, kartevec, clockOff, ninaFix, hideTexts, longArchive, relStop, asyncMini, pagesSplit1, pagesSplit2, pagesSplit3, pegelSplit (23); nach commit45 zusaetzlich perfWsgi (24).
+Marker in dashboard.py (je genau 1x): relHygiene, perfKeep, sameOrigin, alarmFaden, relWatch, dbVis, mapUi, modDead, secXmlDash, wxSlot, meshBootQuiet, funkHarden2, kartevec, clockOff, ninaFix, hideTexts, longArchive, relStop, asyncMini, pagesSplit1, pagesSplit2, pagesSplit3, pegelSplit, perfWsgi (24; perfWsgi seit commit45).
 
 ### weitere Dateien (Soll laut Apply-Skripten; auf der Pi gegenpruefen, nicht alle in dieser Sitzung erneut gelesen)
 
@@ -169,7 +171,7 @@ Aufruf je Patch: `bash /tmp/apply-<name>.sh commitNN dry-run` (erst Trockenlauf)
 
 REL-01, REL-02 (30), REL-03 (18/18b), REL-04, REL-09 (19/19b), REL-05, REL-06 (25/25b), REL-07 (23), MOD-02 (20), MOD-04 Stufe 1 (22), MOD-08 (32), MOD-09 (28), MOD-10 (Repo-Aufraeumen, Branch-Commits), PERF-02 (29), PERF-03 Backup-Teil (18), PERF-05 (21), PERF-06 (23), SEC-01 Code-Seite (26), SEC-04, SEC-12 (26), SEC-05 (28), SEC-09/10/11 (24, 31x, 33), SEC-13 Teil: Chart.js lokal (19). SEC-02/SEC-03 (Laufzeitdaten/.gitignore) laut Branch-Commits behandelt – in dieser Sitzung nicht neu geprueft.
 REL-10 Teil 3 (39 relStop, im Betrieb bestaetigt). INT-3 (toter scanner_mode_set-Altcode mit sudo systemctl) erledigt durch commit32 modDead; am Stand f8977a31 gibt es kein `sudo systemctl` mehr im Dashboard.
-PERF-01 (45a/45 veroeffentlicht; 45a angewendet, 45 steht aus): waitress 3.0.2, 8 Arbeitsfaeden, ein Prozess, Bind 0.0.0.0:5000, Unit unveraendert.
+PERF-01 (45a/45, angewendet 31.10. 00:13 bzw. 05:42): waitress 3.0.2, 8 Arbeitsfaeden, ein Prozess, Bind 0.0.0.0:5000, Unit unveraendert. Messung nach dem Einspielen: Faeden gesamt 27, unter 48 parallelen Anfragen fest; /pi-Median 0,196 s direkt nach dem Neustart, eingeschwungen 0,183-0,190 s (Werkzeug vorher 0,177 s; kein Gewinn bei Einzelanfragen erwartet, Ziel war feste Fadenzahl und Produktions-Server). Restrisiko: mehr als 8 gleichzeitig lange Anfragen stauen sich; dauert das 180 s, startet relWatch neu (betrifft PERF-03 Rest).
 MOD-06/07 teilweise: 13 Seitenvorlagen in lage_pages.py (41-44), weitere Vorlagen und Code-Module offen. Befund NameError `last_pegel_mesh_auto` behoben (44 pegelFix; Sim-Nachweis: eine Pegel-Meldung pro Wetter-Slot wie vorher, keine zusaetzliche Sendung).
 Zusatz ohne Audit-ID: commit27 perfKeep, 31 dbVis, 31b mapUi, 34 wxSlot (Wetter-Slot, aus Pi-Journal), 35 clockOff (Uhr-Kachel), 36 ninaFix (NINA-TLS), 37 hideTexts (Lage-Texte), 38 docsVer (Docs-Version), 40 asyncMini (async-Minifix), fullcheck.sh 2.0.1 (read-only Pruefskript).
 
@@ -180,15 +182,13 @@ SEC-01 (nur Code-Seite erledigt, Rest bewusst offen), SEC-06, SEC-08.
 ## 6. Noch offen
 
 - SEC-07; SEC-13 Rest
-- PERF-03 (Rest), PERF-04, PERF-07, PERF-08
+- PERF-03 (Rest): naechstes Thema (Wahl Frank 31.10.), Planung laeuft, noch nichts gebaut. Erledigt davon: Backup-Teil (18), /pi-Ping (27 perfKeep), GET /api/mesh_weather sendet nicht mehr. Kandidaten: /api/frequenz und /pegel aus Zwischenspeicher statt Netzabruf in der Anfrage; /mesh und /mesh2 (je 3 Bridge-Abrufe nacheinander); lange Anfragen /api/download_test (bis 100 s) und /api/speedtest?wait=1 (bis 150 s). Sende-, Alarm- und Mesh-Pfade bleiben unberuehrt.
+- PERF-04, PERF-07, PERF-08
 - REL-08
 - REL-10 Teil 1 (Alarmfaeden und NINA/DWD-Sofortrunde vor dem ersten Voll-Update): braucht Freigabe von Frank. REL-10 Teil 2 (network-online.target nicht blockierend, Wait-Online-Zeitlimit): offen.
 - MOD-01, MOD-03, MOD-05; MOD-06, MOD-07 (Seitenvorlagen in Schritten 41-44 begonnen, Rest offen)
 - fullcheck.sh 2.0.1 meldet 84/100; ein Abzug ist ein Airspy-Fehlalarm, Korrektur als 2.0.2 geplant.
 - Aufraeumen (offen, Auftrag vom 30.10. abgebrochen): ca. 250 alte `.bak`-Dateien im Projektordner in ein datiertes Archiv verschieben (nicht loeschen); ca. 130 tote Zeilen in prepper_sdr.py (3 ueberdeckte Erstfassungen: stk_run_cmds, stk_test_stick, _at_start)
-- /pi-Antwortzeit: Median direkt nach dem Neustart wieder 2,2 s (commit44: vorher 0,20 s; ebenso bei commit36/37). Vermutlich Last des ersten Voll-Updates; Nachmessung im eingeschwungenen Zustand steht aus. Bleibt sie hoch, gehoert das zu PERF-01.
-- PERF-01 (WSGI-Server), commit45 perfWsgi: Anwendung durch Frank steht aus (erst `dry-run`, Neustart-Sperre HH:55-HH:04). Aenderung: Block perfWsgi vor `__main__`, letzte Zeile im Hauptprogramm `app.run(...)` -> `_perf_serve()` (waitress `create_server` + `run` im Hauptfaden; kein `waitress.serve`, weil das `logging.basicConfig` setzt), toter `_dt_debug`-Haken ohne `@app.after_request`. Start weiter ueber `python dashboard.py` (alle Faeden wie bisher genau einmal; Sim: Fadenliste alt/neu gleich bis auf 8 x waitress), ohne waitress Rueckfall auf app.run wie bisher. Kein Zugriffsprotokoll, App-Fehler (500 + Traceback) ins Journal; waitress-Warnung `Task queue depth` hoechstens 1x/min als `perfWsgi: alle 8 Arbeitsfaeden belegt`. Neu: `/api/perfwsgi/status` (nur lesen). Unit unveraendert (NotifyAccess=main passt: Herzschlag aus dem Hauptprozess, Sim mit Absender-PID geprueft). Sim-Nachweise: Fadenzahl unter 48 parallelen Anfragen fest (Werkzeug: +8), relWatch-Haenger (alle 8 Arbeitsfaeden blockiert) -> WATCHDOG=trigger nach 196 s aus dem Hauptprozess, SIGTERM (auch im Haenger) -> relStop-Flush, Ende in 0,02 s, sysBoot-Zeitmessung (langsam > 3 s) wirkt. Restrisiko: mehr als 8 gleichzeitig lange Anfragen stauen sich; dauert das 180 s, startet relWatch neu.
-- /pi-Antwortzeit nach perfWsgi im eingeschwungenen Zustand nachmessen (Grundlage fuer weitere PERF-Schritte).
 - Befund am Rande: funk_health.py und funk_page.py machen `from dashboard import fetch_mesh_status`. Weil dashboard.py als Hauptprogramm laeuft, laedt das beim ersten Aufruf dashboard.py ein zweites Mal als Modul `dashboard`. Nicht geaendert, nur gemeldet.
 - gepinnte Zwischenstelle certs/sectigo-e36.pem: noch ca. 3434 Tage gueltig (Stand 26.10.); entfaellt, sobald warnung.bund.de die Kette wieder vollstaendig sendet.
 - `~ip` im venv (Rest eines abgebrochenen pip-Laufs): laut Frank 31.10. fmg:fmg, nicht mehr root; Entfernen gehoert zum Aufraeumen
@@ -196,10 +196,10 @@ SEC-01 (nur Code-Seite erledigt, Rest bewusst offen), SEC-06, SEC-08.
 ## 7. Hinweise fuer den Wiedereinstieg
 
 - Arbeitsordner auf der Box: `/workspace/<patchname>` (`wxslot`, `clockoff`, `bridges`, `relclock`, …) mit `mk/` (Edits, Block, Konfig, apply-*.sh), `src2/` (Pruefprogramm `guard_*.py`), `sim/` (Simulationen), `testout/`. Werkzeuge: `/workspace/lib/mk_apply_dash.py` (Apply-Generator), `/workspace/lib/run_sim_dash.sh`, `/workspace/lib/chain_dash.sh`. Fortschritt: `/workspace/rel01/PROGRESS.md`. Standard: `/workspace/audit-run/PATCH_STANDARD.md`.
-- Naechster Patch baut nach Anwendung von commit45 auf dashboard.py `d0f34851146d65b5` und lage_pages.py `7f9fc0cf17d52644` auf (vorher `1898fde2aa91d066`); beide im Basis-Check. Marker-Pruefung: 24 Marker (mit perfWsgi). Werkzeuge perfWsgi: `/workspace/perfwsgi/` (mk/, sim/hw.sh fuer Faden-/Watchdog-/SIGTERM-Sim). Werkzeuge fuer weitere Seitenvorlagen: `/workspace/lib/pages/` (README.md; Namensliste reicht; Zusatzzeilen und spaetere `NAME = NAME.replace(...)`-Schichten werden unterstuetzt).
+- Naechster Patch (commit46) baut auf dashboard.py `d0f34851146d65b5` und lage_pages.py `7f9fc0cf17d52644` auf; beide im Basis-Check. Marker-Pruefung: 24 Marker (mit perfWsgi). Werkzeuge perfWsgi: `/workspace/perfwsgi/` (mk/, sim/hw.sh fuer Faden-/Watchdog-/SIGTERM-Sim). Werkzeuge fuer weitere Seitenvorlagen: `/workspace/lib/pages/` (README.md; Namensliste reicht; Zusatzzeilen und spaetere `NAME = NAME.replace(...)`-Schichten werden unterstuetzt).
 - Simulationen nur auf Port 5093, immer nur eine gleichzeitig, keine Screenshots.
 - Kleine Fixes Docs-Version, REL-10 Teil 3, async-Minifix und INT-3 sind erledigt (30.10.).
-- Modul-Aufteilung laeuft (commit41-44: 13 Seitenvorlagen, dashboard.py von 26046 auf 21790 Zeilen). Aufraeumen folgt spaeter. PERF-01: commit45 perfWsgi wartet auf Anwendung.
+- Modul-Aufteilung laeuft (commit41-44: 13 Seitenvorlagen, dashboard.py von 26046 auf 21790 Zeilen). Aufraeumen folgt spaeter. PERF-01 erledigt (commit45 perfWsgi angewendet 31.10. 05:42).
 - **Freigabe von Frank noetig vor:** MOD-05, MOD-06, MOD-07, PERF-03 (Rest), PERF-04.
 - Offene Beobachtung: fehlende Mesh-Meldungen werden vom anderen Worker untersucht (nicht Teil dieser Patches).
 
