@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fullcheck.sh - Gesamtpruefung "Lage Pi" (BND-Prepper): Pi, Dienste, Dashboard, Patch-Stand (bis commit37), NINA-Zertifikatskette, Mesh, SDR, DB, Backups, Sicherheit, Journal
+# fullcheck.sh - Gesamtpruefung "Lage Pi" (BND-Prepper): Pi, Dienste, Dashboard, Patch-Stand (bis commit47), NINA-Zertifikatskette, Mesh, SDR, DB, Backups, Sicherheit, Journal
 # Aufruf:  bash fullcheck.sh [--kurz] [--json] [--sudo] [--no-color] [--help] | --selftest | --version      (auch: bash ~/fullcheck.sh)
 # Strikt nur lesend: aendert nichts am System, am Projekt, am Dashboard oder an der Datenbank, startet nichts neu, sendet nichts (kein Mesh, kein Telegram,
 # keine Alarme, keine Mail, keine POSTs), oeffnet keine SDR-Sticks, scannt kein Netz, zeigt nie Schluessel/Passwoerter/Tokens, schreibt keine Dateien (auch keine temporaeren).
@@ -11,7 +11,7 @@ export TZ=Europe/Berlin
 export PYTHONDONTWRITEBYTECODE=1
 export PATH="${PATH:-/usr/bin:/bin}:/usr/sbin:/sbin:/usr/local/bin"
 
-FC_VERSION="2.0.1"
+FC_VERSION="2.0.2"
 T0=$SECONDS
 
 # ---------------------------------------------------------------- Konfiguration (Umgebungsvariablen FC_* nur fuer Tests/Sonderfaelle)
@@ -26,7 +26,7 @@ GPSD_PORT="${FC_GPSD_PORT:-2947}"
 PROC="${FC_PROC:-/proc}"
 SYS="${FC_SYS:-/sys}"
 DROPIN_DIR="${FC_DROPIN_DIR:-/etc/systemd/system/prepper-dashboard.service.d}"
-DASH_SHA16="${FC_DASH_SHA16:-bb94f52af6e03c3b}"   # bestaetigter Pi-Stand nach commit37 hideTexts (26.10.2026 ~19:05), 25879 Zeilen
+DASH_SHA16="${FC_DASH_SHA16:-74ac7bfd0eebd4e0}"   # Soll nach commit47 speedAsync (31.10.2026), 22340 Zeilen; vorher bb94f52af6e03c3b nach commit37
 PYBIN="${FC_PY:-python3}"
 VENV_PY="${FC_VENV_PY:-$APP/venv/bin/python}"
 BUDGET_S="${FC_BUDGET_S:-50}"                      # nach so vielen Sekunden werden restliche Seitentests uebersprungen
@@ -37,7 +37,7 @@ SERVICES=(prepper-dashboard prepper-sdr mesh-bridge mesh-bridge-bayern)
 PAGES=(/ /funk /pi /umwelt /funk433 /aprs /meteor /rundfunk /energie /dabhist /mesh /karte
        /api/sdr/ui /api/sdr/wd /api/br24 /api/sdr/sticktest /api/sdr/live /api/sdr/map /api/broadcast/events
        /api/t2/status /api/t3/status /api/t4/status /api/t4/map /api/t4/tii /api/meteor /api/sdr/status)
-MARKERS=(relHygiene perfKeep sameOrigin alarmFaden relWatch dbVis mapUi modDead secXmlDash wxSlot meshBootQuiet funkHarden2 kartevec clockOff ninaFix hideTexts)   # je genau 1x "# ===== <Name>:"
+MARKERS=(relHygiene perfKeep sameOrigin alarmFaden relWatch dbVis mapUi modDead secXmlDash wxSlot meshBootQuiet funkHarden2 kartevec clockOff ninaFix hideTexts longArchive relStop asyncMini pagesSplit1 pagesSplit2 pagesSplit3 pegelSplit perfWsgi perf03Cache speedAsync)   # je genau 1x "# ===== <Name>:"
 NINA_PEM_REL="certs/sectigo-e36.pem"; NINA_PEM_DER16="873f0ba8"   # DER-sha256 beginnt so (Sectigo Public Server Authentication CA DV E36)
 # Referenz-sha16 weiterer Dateien laut AUDIT-STAND.md (NICHT als bestaetigt gefuehrt -> nur Anzeige): "Pfad:sha16"
 REFS=(database.py:e7a7ef192c522480 lage_xml.py:f77305fc17ed2f77 mesh_bridge.py:3482f6e386cf26ce mesh_bridge_bayern.py:c1176b457346ae49
@@ -882,12 +882,12 @@ if (( DASH_UP )); then
 fi
 
 # ================================================================ 5) Patch-Stand
-section "Patch-Stand (Soll: AUDIT-STAND.md, nach commit37)"
+section "Patch-Stand (Soll: AUDIT-STAND.md, nach commit47)"
 DASHF="$APP/dashboard.py"
 if [[ -r "$DASHF" ]]; then
   DSH="$(sha16_of "$DASHF")"
-  if [[ "$DSH" == "$DASH_SHA16" ]]; then ok "dashboard.py sha16" "$DSH = Soll (bestaetigter Pi-Stand nach commit37), $(wc -l < "$DASHF") Zeilen"
-  else warn "dashboard.py sha16" "$DSH, Soll $DASH_SHA16 (nach commit37)" "Neuer Patch seit commit37 oder Abweichung? Dann Soll im Skript (FC_DASH_SHA16) nachziehen; sonst Stand gegen AUDIT-STAND.md pruefen."; fi
+  if [[ "$DSH" == "$DASH_SHA16" ]]; then ok "dashboard.py sha16" "$DSH = Soll (Pi-Stand nach commit47), $(wc -l < "$DASHF") Zeilen"
+  else warn "dashboard.py sha16" "$DSH, Soll $DASH_SHA16 (nach commit47)" "Neuer Patch seit commit47 oder Abweichung? Dann Soll im Skript (FC_DASH_SHA16) nachziehen; sonst Stand gegen AUDIT-STAND.md pruefen."; fi
   MKBAD=""; MKSUM=""
   for m in "${MARKERS[@]}"; do
     c="$(grep -c "# ===== $m:" "$DASHF" 2>/dev/null)"; [[ "$c" =~ ^[0-9]+$ ]] || c="?"
@@ -997,9 +997,12 @@ else warn "Stromausfall-Stand (Datei)" "outage_mesh_state.json fehlt" "Wird nach
 # ================================================================ 7) SDR
 section "SDR (nur lesen, keine Sticks geoeffnet)"
 declare -A USBSN=() USBID=() USBID_SN=()
+# 2.0.2: Airspy meldet im sysfs "AIRSPY SN:637862DC2E8092D7" - Praefix bis "SN:" abschneiden, verglichen wird nur die Hex-Nummer
+SN_RE='^[A-Z0-9_ .-]*SN:[[:space:]]*([0-9A-F]+)[[:space:]]*$'
 for d in "$SYS"/bus/usb/devices/*; do
   [[ -d "$d" ]] || continue
   sn=""; [[ -r "$d/serial" ]] && { read -r sn < "$d/serial" 2>/dev/null || sn=""; }
+  sn="${sn^^}"; [[ "$sn" =~ $SN_RE ]] && sn="${BASH_REMATCH[1]}"
   pr=""; [[ -r "$d/product" ]] && read -r pr < "$d/product" 2>/dev/null
   [[ -n "$sn" ]] && USBSN["${sn^^}"]="${pr:-?}"
   vid=""; pid=""
