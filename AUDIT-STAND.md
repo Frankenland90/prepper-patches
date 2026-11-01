@@ -1,7 +1,7 @@
 # AUDIT-STAND – Prepper-Dashboard (BND-Prepper)
 
-Stand: Samstag 31.10.2026, 12:57 Uhr (Berlin), aktualisiert: REL-10 Teil 1 gemessen, nicht noetig (first_update_s 16,9 s), nicht gebaut; commit47 angewendet (11:30). Keine Secrets in dieser Datei.
-Geschrieben vom Ausfuehrungs-Agenten (Grok Bot) fuer Frank. Vorige Fassung: 31.10. 11:51 (Blob 3f964325).
+Stand: Sonntag 01.11.2026, 08:45 Uhr (Berlin), aktualisiert: commit48 bis commit59 nachgetragen (commit57/58 am 01.11. angewendet, commit59 veroeffentlicht und wird gerade eingespielt). Keine Secrets und keine Seriennummern in dieser Datei.
+Geschrieben vom Ausfuehrungs-Agenten (Grok Bot) fuer Frank. Vorige Fassung: 31.10. 12:57 (Stand nach commit47).
 
 Host: BND-Prepper, Debian 13 aarch64, systemd 257, Python 3.13, Port 5000, Benutzer fmg, Projekt `/home/fmg/prepper-dashboard`, kein node auf der Pi.
 Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PERF-01..08, REL-01..10, MOD-01..10).
@@ -15,6 +15,9 @@ Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PER
   Nur die zwei Hauptdateien, ohne Pipe: `sha256sum /home/fmg/prepper-dashboard/dashboard.py /home/fmg/prepper-dashboard/lage_pages.py`
 
   (erste 16 Zeichen je Datei mit dem Soll vergleichen).
+- commit57 usvShutdown und commit58 dokuStand am 01.11. 06:26-06:30 angewendet, alle Pruefungen OK (Frank-Ausgabe): dashboard.py `7d494c1a21e50e96` (25247 Zeilen, 36 Marker je 1x), lage_pages.py `a9740c629a41806c` (4547 Zeilen), ups_manager.py `ef0b9e3d4bf42003`, prepper_sdr.py `264ef34996e17753`, prepper_evlog.py `8bffd396972b60fa`, prepper_docs.py `43032d218135e329` (Generator 3, Beschreibung v20261101-0630). upsmon aktiv, Status OL, kein killpower-Merker. Smoke 13 Seiten + 14/15 APIs 200.
+- commit48 bis commit56 waren davor angewendet (der Basis-Check von commit57 fand am 01.11. dashboard.py `35fbc0604b09c0dd` = Ziel commit56, lage_pages.py `92a37e6326f0900d`, NUT wie nach commit55).
+- commit59 snFrei: erster Bau (main 37eb40ad, sha256 162b63d0...) stoppte am 01.11. auf der Pi ohne Aenderung im Selbsttest selftest_sdrstick3e. Ursache: der Test las die echte Pi-Last (os.getloadavg, Schwelle 0,8 je Kern) - beim Einspielen lag sie darueber; der unveraenderte commit58-Stand scheitert unter Last genauso. Zusaetzlich scheiterten Selbsttests in den Stunden 03 und 05 (Kalibrierstunden). Korrigierter Bau main d1e54d4e (sha256 f70d332f...) wird gerade eingespielt - Ergebnis noch nicht bestaetigt.
 - commit47 angewendet 31.10. 11:30, alle Pruefungen OK: dashboard.py `74ac7bfd0eebd4e0` (22340 Zeilen, 26 Marker je 1x), lage_pages.py `1d33ae9fd78f53dc` (4496 Zeilen), prepper_sdr.py `0900bfe6ba67e657` (14126 Zeilen), fullcheck.sh 2.0.2 (`192f3b9b1c0f6418`). Smoke 26/26, nur prepper-dashboard neu gestartet (prepper-sdr nicht). /pi-Median 0,238 s direkt nach dem Neustart (vorher 0,200 s). Sicherungen `*.bak-commit47-20261031-112144`, Archiv `bak-archiv/20261031-112144` (4 Dateien, 3,2 MB, dazu der `~ip`-Rest).
 - fullcheck 2.0.2 danach: 98/100, 121 OK, 1 HINWEIS (Stick 2 hobby laut fullcheck nicht am USB-Bus - laut Frank NICHT abgezogen, Hinweis wird untersucht), 0 FEHLER; der Airspy-Fehlalarm aus 2.0.1 ist weg.
 - commit46 perf03Cache angewendet 31.10. 07:31, alle Pruefungen OK, 25 Marker. Messung danach: /api/frequenz 0,009 s, /pegel 0,052 s (vorher 0,088 s / 0,489 s). Stand danach: dashboard.py `4594deab53d8ce7b` (22185 Zeilen), lage_pages.py `7f9fc0cf17d52644`, prepper_sdr.py `8b887c795e64b87f`, fullcheck.sh 2.0.1.
@@ -26,7 +29,7 @@ Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PER
 - pegelFix (commit44) im Betrieb: Journal `pegelSplit aktiv: ... pegelFix: 3 Namen da`.
 - Aeltere Bestaetigungen: commit34 25.10. 20:36, commit35 25.10. 20:42, commit36 26.10. ~18:23, commit37 26.10. ~19:05.
 - relStop (commit39) im Betrieb bestaetigt: beim Neustart am 30.10. um 06:40:18 stand im Journal `relStop SIGTERM: uplinkDetect uplink_state.json gespeichert` und `fertig in 0.01 s`.
-- Kein Patch veroeffentlicht und offen: der Pi-Stand entspricht dem letzten veroeffentlichten Patch (commit47). Jeder Patch prueft die Basis per sha16 und stoppt sonst mit klarer Meldung.
+- Veroeffentlicht, Anwendung offen: nur commit59 (laeuft). Jeder Patch prueft die Basis per sha16 und stoppt sonst mit klarer Meldung.
 
 ## 2. Pi-Stand (sha16 = erste 16 Hex-Zeichen von sha256)
 
@@ -52,7 +55,18 @@ Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PER
 | commit44 pegelSplit | 1898fde2aa91d066 (30.10. 23:08 angewendet), 21790 Zeilen (Blob 891fd04f) |
 | commit45 perfWsgi | d0f34851146d65b5 (31.10. 05:42), 21941 Zeilen, 1126150 B (Blob 223c51f4) |
 | commit46 perf03Cache | 4594deab53d8ce7b (31.10. 07:31), 22185 Zeilen, 1137546 B (Blob 3697430b) |
-| commit47 speedAsync | **74ac7bfd0eebd4e0** <- bestaetigter Pi-Stand (31.10. 11:30), 22340 Zeilen, 1145572 B (Blob 7873cc17) |
+| commit47 speedAsync | 74ac7bfd0eebd4e0 (31.10. 11:30), 22340 Zeilen, 1145572 B (Blob 7873cc17) |
+| commit48 geoRelevanz | 334b60f2ed228831 |
+| commit49 audioKern | 1dc1eedcb0c91342 (23580 Zeilen) |
+| commit50 audioUi | 2a3625a3325653b1 (23774 Zeilen) |
+| commit51 kartePop | 67d58079139cd373 |
+| commit52 hbProblem | ab18872053f58871 |
+| commit53 umweltFlach | 832787ef1c3b44bc |
+| commit54 qrmRun | 7b81384b4af00883 |
+| commit55 usvLesen | 86f712401eddab5f |
+| commit56 usvAlarm | 35fbc0604b09c0dd |
+| commit57 usvShutdown | **7d494c1a21e50e96** <- bestaetigter Pi-Stand (01.11. 06:27), 25247 Zeilen; commit58 aendert dashboard.py nicht |
+| commit59 snFrei | 2d0412bbbecc25b3 (nur Platzhalter statt Seriennummern) <- Ziel, wird eingespielt |
 
 ### lage_pages.py (neu seit commit41: Seitenvorlagen aus dashboard.py, nur Text)
 
@@ -62,15 +76,19 @@ Audit-Dokument: `SECURITY_AND_PERFORMANCE_AUDIT.md` (41 Befunde: SEC-01..13, PER
 | commit42 pagesSplit2 | 6a596584014df095 (2471 Zeilen) | + PAGE4, PAGE_SPEICHER, PAGE_UMWELT2, PAGE_PI, PAGE_MESH, PAGE_NEWS, PAGE_LUFT |
 | commit43 pagesSplit3 | 231d4c309c1ae009 (4241 Zeilen) | + PAGE1, PAGE2, PAGE3, PAGE_LOKALE_ENERGIE |
 | commit44 pegelSplit | 7f9fc0cf17d52644 (4480 Zeilen), Branch-Blob 1f38c694 | + PAGE_PEGEL |
-| commit47 speedAsync | **1d33ae9fd78f53dc** (4496 Zeilen, 205198 B, Blob f4e8129c) <- Pi-Stand (31.10. 11:30) | measureDownload in PAGE_PI: 202 + Abfrage /api/speedtest |
+| commit47 speedAsync | 1d33ae9fd78f53dc (4496 Zeilen, 205198 B, Blob f4e8129c) | measureDownload in PAGE_PI: 202 + Abfrage /api/speedtest |
+| commit53 umweltFlach | a51d9b51a646813d | /umwelt flach (feste Reihenfolge, Erklaerungen hinter "i") |
+| commit55 usvLesen | 495ee5ac809143c8 | USV-Kachel #usvCard auf /lokale-energie |
+| commit56 usvAlarm | 92a37e6326f0900d | Knopf Audio-Pegel testen, Netzausfall-Anzeige |
+| commit57 usvShutdown | **a9740c629a41806c** (4547 Zeilen) <- Pi-Stand (01.11.) | Kachel-Zeile Abschaltung (usvShut) |
 
-Marker in dashboard.py (je genau 1x): relHygiene, perfKeep, sameOrigin, alarmFaden, relWatch, dbVis, mapUi, modDead, secXmlDash, wxSlot, meshBootQuiet, funkHarden2, kartevec, clockOff, ninaFix, hideTexts, longArchive, relStop, asyncMini, pagesSplit1, pagesSplit2, pagesSplit3, pegelSplit, perfWsgi (24; perfWsgi seit commit45); nach commit46 zusaetzlich perf03Cache (25); seit commit47 zusaetzlich speedAsync (26, auf der Pi bestaetigt).
+Marker in dashboard.py (je genau 1x): relHygiene, perfKeep, sameOrigin, alarmFaden, relWatch, dbVis, mapUi, modDead, secXmlDash, wxSlot, meshBootQuiet, funkHarden2, kartevec, clockOff, ninaFix, hideTexts, longArchive, relStop, asyncMini, pagesSplit1, pagesSplit2, pagesSplit3, pegelSplit, perfWsgi (24; perfWsgi seit commit45); nach commit46 zusaetzlich perf03Cache (25); seit commit47 zusaetzlich speedAsync (26); commit48-57 dazu geoRelevanz, audioKern, audioUi, kartePop, hbProblem, umweltFlach, qrmRun, usvLesen, usvAlarm, usvShutdown = 36 Marker (auf der Pi bestaetigt 01.11.).
 
 ### weitere Dateien (Soll laut Apply-Skripten; auf der Pi gegenpruefen, nicht alle in dieser Sitzung erneut gelesen)
 
 | Datei | sha16 Soll | aus Patch |
 |---|---|---|
-| database.py | e7a7ef192c522480 | secXml (commit31x) |
+| database.py | 2754d0bdddca9400 | snFrei commit59 (Ziel; vorher Stand commit58, nur Platzhalter-Tausch) |
 | lage_xml.py | f77305fc17ed2f77 | secXml |
 | mesh_bridge.py | 3482f6e386cf26ce | bridgeCore commit22 |
 | mesh_bridge_bayern.py | c1176b457346ae49 | bridgeCore commit22 |
@@ -80,8 +98,13 @@ Marker in dashboard.py (je genau 1x): relHygiene, perfKeep, sameOrigin, alarmFad
 | tools/backup.sh | 5053f6b8a43a8638 | relBackup2 commit18b |
 | Restore-Werkzeug | c0e305b8ea4d9007 | relBackup commit18 |
 | health_check.py | 5a0156ff02d5960c | relHygiene commit19b |
-| prepper_docs.py | 41f34abc4cabeb5a | docsVer commit38 (29.10., bestaetigt; vorher 609f0a7f00ab586b) |
-| prepper_sdr.py | **0900bfe6ba67e657** (14126 Zeilen, Blob 61c6fb87; bestaetigt 31.10. 11:30; vorher 8b887c795e64b87f) | seit sdrStick3e unveraendert; commit47 entfernt 3 ueberdeckte Erstfassungen (139 Zeilen) |
+| prepper_docs.py | 43032d218135e329 (bestaetigt 01.11., Generator 3) -> 2e1e23726611b2ec (commit59, Stick-Tabelle neutral) | docsVer commit38, dokuStand commit58, snFrei commit59 |
+| prepper_sdr.py | 264ef34996e17753 (qrmLage commit54, bestaetigt 01.11.) -> b879ab56f4ac4736 (commit59: Seriennummern nur lokal, Selbsttests last-/uhrunabhaengig) | vorher 0900bfe6ba67e657 (commit47) |
+| sdr_manager.py | 5a26efff608bf541 | snFrei commit59 (nur Platzhalter-Tausch) |
+| prepper_evlog.py | 8bffd396972b60fa | evlFix commit54 |
+| ups_manager.py | ef0b9e3d4bf42003 | usvLesen commit55 (neu) |
+| sdr_serials.local.json | nur lokal auf der Pi, Rechte 600, nie im Repo | snFrei commit59 (legt das Apply-Skript an) |
+| /etc/nut (ups.conf, upsd.users, upsmon.conf) | lokal, root:nut 640, Passwort zufaellig und nur lokal | usvNut commit55, usvShutdown commit57 |
 | funk_health | f1b16a5f9bc7317c | relHygiene (aelterer Stand) |
 | mesh_hang_watchdog | 1518dbd9931c5e96 | relHygiene (aelterer Stand) |
 | lage_clock.py | sha256 beginnt c909aea1148518fe | relClock commit25 |
@@ -133,8 +156,20 @@ Hinweis: Wo "aelterer Stand" steht, kann ein spaeterer Patch die Datei veraender
 | **45** | perfWsgi | PERF-01 Schritt B: waitress statt Werkzeug-Entwicklungsserver (8 Faeden, ein Prozess) | 4c36ef9a80381c18a58be79f6b6c42804dd80652 |
 | **46** | perf03Cache | PERF-03 Rest Punkt 1+2: /api/frequenz aus data_store, /pegel Stale-While-Revalidate | 240280cdf0624bf7a288c389e10b78eaaab48f49 |
 | **47** | speedAsync + Aufraeumen + fullcheck 2.0.2 | PERF-03 Punkt 4 (Download-/Speedtest ohne Blockieren), .bak-Archiv, tote Zeilen prepper_sdr.py, ~ip-Rest, fullcheck Airspy-Seriennummer | 2448473c709e3909c87d021f3bd78000d60c4390 (apply-commit47.sh + fullcheck.sh 2.0.2) |
+| **48** | geoRelevanz | Ortsbezug der BR24/ASA-Warntexte (INFO/WARNUNG/rot, Bestaetigung binnen 30 min); Vorfall-Sim 12/12 | 321ada77 |
+| **49** | audioKern | Lautsprecher-Warteschlange KATASTROPHE > WARNUNG > INFO, Nachtruhe 22-07, Stumm max. 8 h | 871adf76ba1c8ba46b7222c8d286e19fe6a2b45a |
+| **50** | audioUi | Audio-Kachel #audioBox auf /pi ueber der Sicherung | 4cb22e3acd7b37669c86201d3b720fbadd8300d7 |
+| **51** | kartePop | Karten-Popup Mast/Linie, parallele Linien, /api/karte/hist | 7939001661af203ded69199354796aa23d268552 |
+| **52** | hbProblem | Heartbeat Mesh 1 nur bei echtem Problem plus Entwarnung | f010d6fc5844b1db7e4e14e7f6db1138589c55ba |
+| **53** | umweltFlach | /umwelt flach, feste Reihenfolge, Erklaerungen hinter "i", Abruf nur bei sichtbarem Tab | 296763b505abf9f5e1aa80536015a7328c1d591b |
+| **54** | qrmLage + evlFix + qrmRun | QRM-Pause max. 6 h, Waechter "QRM steht"; Ereignis-Log verwirft Uhrsprung-Ereignisse; Anzeige QRM-Zustand | 6b89fe9e45597f2608f95f2046abe11ad9abd20f |
+| **55** | usvNut + usvLesen | NUT nur lokal (127.0.0.1:3493), ups_manager.py, USV-Kachel, /api/usv (nur Anzeige, nie ein Befehl an die USV) | a6992b76cafcfe69c018b1918e63ed8a88eab7e8 |
+| **56** | usvAlarm | Netzausfall: Gong + Ansage, zweite Ansage bei 5 min, Mesh-Punkt STROM, Probegong | 818c9b15ddafaea6568aa8da6d2e5c055c712b4e |
+| **57** | usvShutdown | upsmon faehrt den Pi bei 20 % oder 5 min herunter, killpower; Dashboard zeigt nur an | 0ee72d3517bb589956c9a9aecf5eb0ee5dcde213 |
+| **58** | dokuStand | Projektbeschreibung (prepper_docs.py Generator 3) auf Stand commit39-57 | 18e9eecca85c918b8c2a1bf6767db3f3b38cd342 |
+| **59** | snFrei | Stick-/Airspy-Seriennummern aus allen veroeffentlichten Dateien entfernt (neutrale Platzhalter, Werte nur lokal in sdr_serials.local.json, 600), Neustart prepper-sdr + prepper-dashboard mit Stick-Zuordnungs-Pruefung | d1e54d4e11d80d2c07a72a63b957d807aa32b7cf (ersetzt 37eb40ad, der auf der Pi im Selbsttest stoppte) |
 
-Fett = vom Auftrag "19b/22/27–35" erfasst, sowie die neuen Commits 38–44.
+Fett = vom Auftrag "19b/22/27–35" erfasst, sowie die neuen Commits 38–59.
 
 ### dashboard.py auf Branch `kaeswasser-lage-monitor` (Repo Frankenland90/kaeswasser-lage-monitor)
 
@@ -159,6 +194,18 @@ Fett = vom Auftrag "19b/22/27–35" erfasst, sowie die neuen Commits 38–44.
 | 45 perfWsgi (dashboard.py Blob 223c51f4; lage_pages.py unveraendert) | a48c0483c93efde09b816c7090161b4659286b4a |
 | 46 perf03Cache (dashboard.py Blob 3697430b; lage_pages.py unveraendert) | c3c11ecebcb1bab263a1a6f3cf626d206643da0a |
 | 47 speedAsync (Blobs dashboard.py 7873cc17 / lage_pages.py f4e8129c / prepper_sdr.py 61c6fb87) | 5b533749294682a96833d35eab5a065cd515e62a |
+| 48 geoRelevanz (dashboard.py Blob 1eeded24) | 5d08fd61 |
+| 49 audioKern (Blob a9ea7226) | 1a4c731489fe16496fe371a6e92ad0c6ded39671 |
+| 50 audioUi (Blob 39899a94) | b7984f6603a3a7ce00974cd0945ffd93a4370223 |
+| 51 kartePop (Blob 30b055aa) | 5b0fd5d752399b82ca4b17a865ae7051d5228835 |
+| 52 hbProblem (Blob 6d754df8) | 27b80df16a9a521432377830576f5b953efb1537 |
+| 53 umweltFlach (Blobs ab583ab6 / 83e3d288) | 6b95c2d05805958c812f55493ff35232801edec2 |
+| 54 qrmLage/evlFix/qrmRun (Blobs 08d24330 / 97ad0a2b / b5e4ab1f) | 7f01f7da897967575f82cc6280ef02ddce91837e |
+| 55 usvLesen (Blobs dashboard 7edc28dd / lage_pages f9b49d26 / ups_manager c1c12ec8) | 7d3ea7590eec2af991dcd37a5c7ffa2f65444c14 |
+| 56 usvAlarm (Blob dashboard 8bd9210c) | bb0fe7f3f1f84b8c58f2199bb50a09864ff61504 |
+| 57 usvShutdown | 650639f05ffd238d5e1a4892f42a36b2d2f04b0f |
+| 58 dokuStand (prepper_docs.py Blob 7b225dd7) | e64d28a456d69e9954487c98ee627a6060ab1263 |
+| 59 snFrei (4 Dateien + dashboard.py, je max. 4 pro Push) | b5b0c631b0dd0c2d4dded33da0210804f7abb865 + b474d979a0c9038a923c41c2f7dbf635dd5dc0b2; Fix prepper_sdr.py e863b786a205a63a846941897365b4145f8f7a6b |
 
 Aeltere Branch-Commits (secXml: lage_xml/database c7c27ed8…, requirements a2f411fa…, .gitignore 48a77020…, MOD-10-Aufraeumen archive/*, Audit-Doku eb48496f…): `git log` im Repo.
 
@@ -172,6 +219,19 @@ Aeltere Branch-Commits (secXml: lage_xml/database c7c27ed8…, requirements a2f4
 - apply-perfwsgi.sh (45): 62882 B, sha256 60fd2672b0ffb0d4b9f1a8094616454e4a0c487caa1ac9ac7e4727f5fbf74860 (STOP, wenn waitress 3.0.2 nicht im venv ist)
 - apply-commit47.sh (47): 189089 B, sha256 d4fae93cf10980aae09e263b7e4b87fae3266c970813ac4e216b690688a7b157 (STOP bei Mischstand oder fremder Basis einer der drei Dateien, perfWsgi nicht aktiv, Neustart-Sperre; Aufruf `bash /tmp/apply-commit47.sh commit47`, Trockenlauf mit `dry-run`)
 - apply-perf03cache.sh (46): 66535 B, sha256 4c2a279431b4a59da7ccd57f40e4f950b4a67976f69b58e619942ee15a40fee0 (STOP bei fremder Basis, lage_pages.py ungleich 7f9fc0cf17d52644, perfWsgi nicht aktiv, Neustart-Sperre)
+
+- apply-commit48.sh (48): 90486 B, sha256 fd4b622b703be85bc840bcf0c55c0deba231d5366a417304067933f771664f46
+- apply-commit49.sh (49): 100044 B, sha256 7fef8f156e72e678db72d345ad5ebb98c6f20878e21687769b265d5df13c1cd5
+- apply-commit50.sh (50): 142344 B, sha256 d8adc7e0953d290d31a3561f95f5889a647ec3d0b819d588456266e0b0e3d3bc
+- apply-commit51.sh (51): 88011 B, sha256 df10b51538879ee561af10bedf9d1e9aae9c247320cc8f44cd8b2e5084c22bac
+- apply-commit52.sh (52): 71700 B, sha256 d64cd2a6ec55480ae54625fbf7a0ffa9a9471495d6ec04cc508de41b9bb81bf9
+- apply-commit53.sh (53): 130694 B, sha256 2cae60f0757db4ed086fc4817a0ef8f305901613159952b7f943fd232c680bf3
+- apply-commit54.sh (54): 129027 B, sha256 45fc75941367dd94c351e5b4985ab4965d3c97e358d2c13514e57f38842125b7
+- apply-commit55.sh (55): 132973 B, sha256 b158ff0fd47d012f802725d0e35731d7807bd69b080032c1da03837c580cd034
+- apply-commit56.sh (56): 77182 B, sha256 5424e73c0387a969c3127b302f5b005e63b79236bd5d0b6421ceaab75c2d7bb8
+- apply-commit57.sh (57): 85198 B, sha256 cbb0eb813ac369c6570986680d9ca0644af899c7869cc1168289f7ee4533478e
+- apply-commit58.sh (58): 66206 B, sha256 253484a83988508cfa4416167d20a1d5882a446592f14dec235ebfe659c68ee3
+- apply-commit59.sh (59): 58058 B, sha256 f70d332fa0f6105dcae9aa7296d58d96be37d9f827ca67133fb6c33fb06ca1b7 (gepinnt main d1e54d4e; Selbsttest-Gegenprobe alt/neu zur selben Uhr; startet prepper-sdr und prepper-dashboard neu, Neustart-Sperre)
 
 - apply-docsver.sh (38): 50788 B, sha256 c1b0549ff7385040c9a8067c5500635f2a0733cbe0984158e2b2b347c567fd04
 - apply-relstop.sh (39): 41179 B, sha256 1667ff4a6affee7f15f2ecd18814d2ee7f47ff944b03f832f3feadb2dcdad957
@@ -188,6 +248,9 @@ MOD-06/07 teilweise: 13 Seitenvorlagen in lage_pages.py (41-44), weitere Vorlage
 Zusatz ohne Audit-ID: commit27 perfKeep, 31 dbVis, 31b mapUi, 34 wxSlot (Wetter-Slot, aus Pi-Journal), 35 clockOff (Uhr-Kachel), 36 ninaFix (NINA-TLS), 37 hideTexts (Lage-Texte), 38 docsVer (Docs-Version), 40 asyncMini (async-Minifix), fullcheck.sh 2.0.1/2.0.2 (read-only Pruefskript), 47 Aufraeumen (.bak-Archiv, tote Zeilen prepper_sdr.py, ~ip-Rest).
 PERF-03 vollstaendig bis auf Punkt 3: Punkt 1+2 (46, angewendet 31.10. 07:31), Punkt 4 (47 speedAsync, angewendet 31.10. 11:30): /api/download_test und POST /api/speedtest?wait=1 starten die Messung im Hintergrund und antworten sofort mit 202 + Abfrage ueber /api/speedtest; Ergebnis der letzten 5 min direkt wie bisher; /api/backup/restore unveraendert.
 
+Zusatz ohne Audit-ID (commit48-59): geoRelevanz (48), Lautsprecher audioKern/audioUi (49/50), kartePop (51), hbProblem (52), umweltFlach (53), QRM-Fixes + Ereignis-Log (54), USV NUT/Kachel/Ansage/Abschaltung (55-57), dokuStand (58). Tests je Patch: Guard mit Mutationstest 0 uebersehen (mit und ohne node), py_compile System- und venv-Python, Sim-Kette auf Port 5093 (normal + Wiederholung idempotent, Rollback erzwungen, Manipulation, fremde Basis, Mischstand, Neustart-Sperre), Smoke aller Seiten/APIs.
+SEC-03-Naehe (Datenhygiene): commit59 snFrei entfernt Stick-/Airspy-Seriennummern aus allen veroeffentlichten Programmdateien und der Doku (Werte nur lokal, Rechte 600); geprueft gegen die echten Werte lokal, ohne sie auszugeben. Selbsttests seither unabhaengig von Pi-Last und Uhrzeit (Sim zu 06:30, 23:30, 02:30, 03:30, 05:30, unter Last).
+
 ## 5. Bewusst offen (Entscheidung Frank)
 
 SEC-01 (nur Code-Seite erledigt, Rest bewusst offen), SEC-06, SEC-08.
@@ -201,7 +264,10 @@ SEC-01 (nur Code-Seite erledigt, Rest bewusst offen), SEC-06, SEC-08.
 - REL-10 Teil 1 (NINA/DWD-Sofortrunde beim Start, vor dem ersten Voll-Update): gemessen, nicht noetig (first_update_s 16,9 s), nicht gebaut - Entscheidung Frank 31.10. Messung auf der Pi 31.10. 12:55 (/api/sysboot/status): first_update_s 16,9 s (unter der 30-s-Schwelle aus dem Plan), Alarm-Faden ok, NINA und DWD frisch, alle Faeden ok, Watchdog scharf, slow_n 2 (/pi 5,5 s, /luft 3,1 s, Einzelfaelle). Plan bleibt in der Sandbox (`/workspace/rel10/`), falls sich das Erst-Update spaeter deutlich verlaengert.
 - REL-10 Teil 2 (network-online.target nicht blockierend, Wait-Online-Zeitlimit): offen und freigabepflichtig; eigener Patch im Bereich system (Drop-in), braucht Pi-Werte aus systemd-analyze.
 - MOD-01, MOD-03, MOD-05; MOD-06, MOD-07 (Seitenvorlagen in Schritten 41-44 begonnen, Rest offen)
-- fullcheck 2.0.2 (seit 31.10. 11:30): 98/100; einziger HINWEIS: Stick 2 (hobby) nicht am USB-Bus. Laut Frank ist der Stick NICHT abgezogen - der Hinweis wird untersucht (moeglicher Fehlalarm der Erkennung; Seriennummern gehoeren nicht in dieses Repo).
+- fullcheck 2.0.2 (seit 31.10. 11:30): 98/100; einziger HINWEIS: Stick 2 (hobby) nicht am USB-Bus. Laut Frank ist der Stick NICHT abgezogen - der Hinweis wird untersucht (moeglicher Fehlalarm der Erkennung; Seriennummern gehoeren nicht in dieses Repo, seit commit59 auch nicht mehr in den Programmdateien).
+- commit59 snFrei: Ergebnis des Einspielens auf der Pi steht aus (erwartet: Neustart prepper-sdr + prepper-dashboard, Stick-Zuordnung gleich, Selbsttests ok).
+- USV: echter Abschalttest (Netzstecker ziehen) nur mit Frank vor Ort, nie per Befehl; SoH-Basis lernt die ersten 14 Tage.
+- Seiten-Aufraeumen wie /umwelt: commit60 (alle Seiten ausser /umwelt, /funk, /karte) und commit61 (/funk, /karte) freigegeben, in Arbeit.
 - Aufraeumen: erledigt mit commit47 (31.10. 11:30): Archiv `bak-archiv/20261031-112144` (4 Dateien, 3,2 MB; je Datei und Patch bleiben die 3 neuesten Sicherungen im Projektordner), 139 tote Zeilen in prepper_sdr.py entfernt (prepper-sdr laeuft bis zu seinem naechsten Neustart mit der gleichwertigen alten Fassung). Rueckweg: Dateien aus dem Archiv zurueckverschieben.
 - Befund am Rande: funk_health.py und funk_page.py machen `from dashboard import fetch_mesh_status`. Weil dashboard.py als Hauptprogramm laeuft, laedt das beim ersten Aufruf dashboard.py ein zweites Mal als Modul `dashboard`. Nicht geaendert, nur gemeldet.
 - gepinnte Zwischenstelle certs/sectigo-e36.pem: noch ca. 3434 Tage gueltig (Stand 26.10.); entfaellt, sobald warnung.bund.de die Kette wieder vollstaendig sendet.
@@ -210,8 +276,8 @@ SEC-01 (nur Code-Seite erledigt, Rest bewusst offen), SEC-06, SEC-08.
 ## 7. Hinweise fuer den Wiedereinstieg
 
 - Arbeitsordner auf der Box: `/workspace/<patchname>` (`wxslot`, `clockoff`, `bridges`, `relclock`, …) mit `mk/` (Edits, Block, Konfig, apply-*.sh), `src2/` (Pruefprogramm `guard_*.py`), `sim/` (Simulationen), `testout/`. Werkzeuge: `/workspace/lib/mk_apply_dash.py` (Apply-Generator), `/workspace/lib/run_sim_dash.sh`, `/workspace/lib/chain_dash.sh`. Fortschritt: `/workspace/rel01/PROGRESS.md`. Standard: `/workspace/audit-run/PATCH_STANDARD.md`.
-- Naechster Patch (commit48) baut auf dem bestaetigten Pi-Stand auf: dashboard.py `74ac7bfd0eebd4e0`, lage_pages.py `1d33ae9fd78f53dc`, prepper_sdr.py `0900bfe6ba67e657`, fullcheck.sh 2.0.2 `192f3b9b1c0f6418`; Marker-Pruefung: 26 Marker (mit speedAsync). Werkzeuge commit47: `/workspace/commit47/` (mk/, sim/chain_c47.sh, fc2/). Plan REL-10 Teil 1 (nicht gebaut): `/workspace/rel10/`. Werkzeuge perf03Cache: `/workspace/perf03cache/`. Werkzeuge fuer weitere Seitenvorlagen: `/workspace/lib/pages/`.
-- Simulationen nur auf Port 5093, immer nur eine gleichzeitig, keine Screenshots.
+- Naechster Patch (commit60) baut auf dem Zielstand commit59 auf: dashboard.py `2d0412bbbecc25b3`, lage_pages.py `a9740c629a41806c`, prepper_sdr.py `b879ab56f4ac4736`, sdr_manager.py `5a26efff608bf541`, database.py `2754d0bdddca9400`, prepper_docs.py `2e1e23726611b2ec`, ups_manager.py `ef0b9e3d4bf42003`, prepper_evlog.py `8bffd396972b60fa`; 36 Marker. Werkzeuge commit55-59: `/workspace/usv/c55` ... `/workspace/usv/c59` (mk/, sim/), Fortschritt `/workspace/usv/PROGRESS.md`.
+- Sims nur auf Port 5093 (NUT-Attrappe 3494), immer nur eine gleichzeitig, keine Screenshots; Sim-Reste nur per simkill.sh beenden. Seit commit59 laufen Sims zusaetzlich zu mehreren Uhrzeiten (libfaketime nur fuer die Selbsttests) und unter Last.
 - Kleine Fixes Docs-Version, REL-10 Teil 3, async-Minifix und INT-3 sind erledigt (30.10.).
 - Modul-Aufteilung laeuft (commit41-44: 13 Seitenvorlagen, dashboard.py von 26046 auf 21790 Zeilen). Aufraeumen in commit47. PERF-01 erledigt (commit45 perfWsgi angewendet 31.10. 05:42).
 - **Freigabe von Frank noetig vor:** REL-10 Teil 2, MOD-05, MOD-06, MOD-07, PERF-03 Punkt 3, PERF-04.
@@ -221,7 +287,7 @@ SEC-01 (nur Code-Seite erledigt, Rest bewusst offen), SEC-06, SEC-08.
 
 - Keine Schluessel/Keys, keine Provider-Aktionen (z. B. Accounts, Bestellungen, Tarife).
 - Kein Eingriff in die Firewall.
-- Keine Secrets in Repos, Dateien oder Berichten.
-- Patch-Standard: strikter sha16-Basis-Check, Trockenlauf + idempotent, Backups `*.bak-<name>-JJJJMMTT-HHMMSS` (3 behalten), atomare Schreibvorgaenge, AST-Guard mit Mutationstest ohne node, py_compile mit System- und venv-Python, Sandbox-Selbsttests, nur betroffene Dienste neu starten, Smoke-Test aller 26 Seiten/APIs, Rollback mit klarer STOP-Meldung, ein sudo-Prompt, neue Docs-Version nur wenn prepper_docs.py im Umfang.
+- Keine Secrets und keine Geraete-Seriennummern in Repos, Dateien oder Berichten.
+- Patch-Standard: strikter sha16-Basis-Check, Trockenlauf + idempotent, Backups `*.bak-<name>-JJJJMMTT-HHMMSS` (3 behalten), atomare Schreibvorgaenge, AST-Guard mit Mutationstest ohne node, py_compile mit System- und venv-Python, Sandbox-Selbsttests, nur betroffene Dienste neu starten, Smoke-Test aller Seiten/APIs, Selbsttests uhr-/lastunabhaengig mit Gegenprobe alter Stand zur selben Uhr, Rollback mit klarer STOP-Meldung, ein sudo-Prompt, neue Docs-Version nur wenn prepper_docs.py im Umfang.
 - Hoechstens 4 Dateien pro Push. Neustart-Sperre HH:55–HH:04.
 - Sims nur auf Port 5093; Veroeffentlichung: prepper-patches (main) bekommt `apply-<name>.sh`, Branch kaeswasser-lage-monitor bekommt `dashboard.py` (und `lage_pages.py`); danach Raw-Pruefung (cmp, sha256, bash -n) gegen den festgenagelten Commit.
