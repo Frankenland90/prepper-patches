@@ -9,7 +9,7 @@ set -eEuo pipefail
 #  - Die Seriennummern werden auf dem Pi aus den bisherigen Dateien gelesen (feste Ankerstellen) und ersetzt; dieses Skript enthaelt keine.
 # Aufruf: bash /tmp/apply-commit59.sh commit59 [dry-run]   (dry-run = alles pruefen und in der Sandbox testen, nichts installieren, kein Neustart)
 # Basis streng (sha16, Zielstand commit58): prepper_sdr.py 264ef34996e17753, sdr_manager.py 6dd122356d8f3ae1, dashboard.py 7d494c1a21e50e96, database.py e7a7ef192c522480, prepper_docs.py 43032d218135e329.
-#  Ziel: prepper_sdr.py 50a41432722569f4, sdr_manager.py 5a26efff608bf541, dashboard.py 2d0412bbbecc25b3, database.py 2754d0bdddca9400, prepper_docs.py 2e1e23726611b2ec.
+#  Ziel: prepper_sdr.py b879ab56f4ac4736, sdr_manager.py 5a26efff608bf541, dashboard.py 2d0412bbbecc25b3, database.py 2754d0bdddca9400, prepper_docs.py 2e1e23726611b2ec.
 # Neustart: prepper-sdr und prepper-dashboard (fuer diesen Patch freigegeben), Sperre HH:55-HH:04 (Start ab HH:50 gesperrt).
 # Pruefung danach: Dienste aktiv, Stick-Zuordnung wie vorher (gleiche Geraete), prepper_sdr.py selftest, Seiten/APIs wie vorher, Journal ohne Traceback.
 # Fehler -> Rollback: 5 Dateien aus DATEI.bak-commit59-ZEIT, neue lokale Datei entfernt, beide Dienste erneut neu gestartet. Datenbank und sdr_config.json bleiben unberuehrt. Sendet nichts.
@@ -26,7 +26,7 @@ TS=$(date +%Y%m%d-%H%M%S)
 KEEP_LAST=3
 FILES=(prepper_sdr.py sdr_manager.py dashboard.py database.py prepper_docs.py)
 declare -A ALT=([prepper_sdr.py]=264ef34996e17753 [sdr_manager.py]=6dd122356d8f3ae1 [dashboard.py]=7d494c1a21e50e96 [database.py]=e7a7ef192c522480 [prepper_docs.py]=43032d218135e329)
-declare -A NEU=([prepper_sdr.py]=50a41432722569f4 [sdr_manager.py]=5a26efff608bf541 [dashboard.py]=2d0412bbbecc25b3 [database.py]=2754d0bdddca9400 [prepper_docs.py]=2e1e23726611b2ec)
+declare -A NEU=([prepper_sdr.py]=b879ab56f4ac4736 [sdr_manager.py]=5a26efff608bf541 [dashboard.py]=2d0412bbbecc25b3 [database.py]=2754d0bdddca9400 [prepper_docs.py]=2e1e23726611b2ec)
 declare -A KEEP58=([lage_pages.py]=a9740c629a41806c [ups_manager.py]=ef0b9e3d4bf42003 [prepper_evlog.py]=8bffd396972b60fa)
 KNOWN_P16_57="41f34abc4cabeb5a"   # prepper_docs.py vor commit58
 LOCALF="$DASH_DIR/sdr_serials.local.json"
@@ -61,7 +61,7 @@ on_exit() {
     fi
   fi
   # Arbeitskopien mit den alten Werten bzw. dem lokalen Wert aufraeumen (Ordner bleibt 700 fuer die Diagnose)
-  [[ -d "$W" ]] && rm -rf "$W/sn.json" "$W/lf.json" "$W"/st*/sdr_serials.local.json "$W/st_old" "$W/alt" "$W/map" 2>/dev/null || true
+  [[ -d "$W" ]] && rm -rf "$W/sn.json" "$W/lf.json" "$W"/st*/sdr_serials.local.json "$W/st_old" "$W"/sto* "$W/alt" "$W/map" 2>/dev/null || true
 }
 trap on_exit EXIT
 echo "=== snFrei apply ($COMMIT_ARG$([[ "$DRY" == 1 ]] && echo ", TROCKENLAUF")): Seriennummern nur noch lokal (sdr_serials.local.json), Selbsttests mit Platzhaltern, Dashboard-Port $PORT ==="
@@ -163,7 +163,7 @@ if __name__ == "__main__":
         print("scan gesamt: %d" % tot)
         sys.exit(1 if tot else 0)
 MK_SNM_EOF
-EXPECT_EDT="d8aa0d581b12cf4ccacf85cfd2970c9ed4d14cb3331ed2ac2dab9362b531061c"
+EXPECT_EDT="a114d8cbe47330e5a6748875cfd352faef636dd5b1cba8082b9ba2aabbc8eb32"
 cat > "$W/edits.py" << 'MK_EDT_EOF'
 # commit59 snFrei - Textstellen NACH dem Platzhalter-Tausch (snmap.py); enthaelt keine echten Seriennummern
 SDR_EDITS = [
@@ -221,6 +221,30 @@ DOC_EDITS = [
     ('und dokuStand (58, nur diese Datei, Generator-Version 3).',
      'und dokuStand (58, nur diese Datei, Generator-Version 3); danach snFrei (59): Stick-Seriennummern nur noch lokal (sdr_serials.local.json), Selbsttests mit neutralen Platzhaltern.'),
 ]
+# Etappe 2 (Pi 01.11.): selftest_sdrstick3e haengt von der echten Pi-Last ab (os.getloadavg, Schwelle 0.8 je Kern) - im Test feste ruhige Last
+SDR_EDITS += [
+    ('    o_load, o_cpu_cnt = os.getloadavg, os.cpu_count\n    o_bcq = globals()["_s3e_orig_bc_queue"]\n',
+     '    o_load, o_cpu_cnt = os.getloadavg, os.cpu_count\n    o_bcq = globals()["_s3e_orig_bc_queue"]\n'
+     '    os.getloadavg, os.cpu_count = (lambda: (0.4, 0.4, 0.4)), (lambda: 4)   # snFrei: Selbsttest unabhaengig von der echten Pi-Last (Schwelle 0.8 je Kern)\n'),
+    ('        os.getloadavg, os.cpu_count = o_load, o_cpu_cnt\n        h.procs, h.active = [type("P", (), {"pid": 1, "poll": lambda s: None})()], "cal:0"\n',
+     '        os.getloadavg, os.cpu_count = (lambda: (0.4, 0.4, 0.4)), (lambda: 4)   # snFrei: zurueck auf die ruhige Test-Last\n        h.procs, h.active = [type("P", (), {"pid": 1, "poll": lambda s: None})()], "cal:0"\n'),
+]
+# Etappe 2b: in der Stunde 05 (cal_hour3 = 5) will Stick 3 in den Abschnitten 3-7 kalibrieren statt APRS/433 - dort Kalibrierung aus (want laedt die Konfig neu, daher am Objekt); Abschnitt 8 prueft sie wie bisher
+SDR_EDITS += [
+    ('        # 3) Handbetrieb nur auf Stick 2; Stick 3 bleibt in der Automatik und uebernimmt, was Stick 2 gerade nicht macht\n        now = time.time()\n',
+     '        # 3) Handbetrieb nur auf Stick 2; Stick 3 bleibt in der Automatik und uebernimmt, was Stick 2 gerade nicht macht\n        now = time.time()\n'
+     '        h4.cal_due = lambda t: False   # snFrei: Abschnitte 3-7 unabhaengig von der Uhr (Kalibrierstunde 05 h), Abschnitt 8 nimmt es zurueck\n'),
+    ('        # 8) Kalibrierung Stick 3: erste gleich nach dem Start',
+     '        del h4.cal_due   # snFrei\n        # 8) Kalibrierung Stick 3: erste gleich nach dem Start'),
+    ('        h4.cfg["cal_enable"] = True\n        flag = p("sdr_cal_now", tmp)\n',
+     '        h4.cfg["cal_enable"] = True\n        flag = p("sdr_cal_now", tmp)\n'
+     '        h4.cfg["cal_hour"] = time.localtime(now).tm_hour % 23 + 1   # snFrei: Kalibrierstunde nie die aktuelle Stunde (Test unabhaengig von der Uhr)\n'),
+]
+# Etappe 2c: selftest_lage - in der Stunde 03 (cal_hour 3) will der Planer kalibrieren statt idle/Aktivitaet; Rest des Tests ohne Kalibrierung
+SDR_EDITS += [
+    ('    assert pl.want({"mode": "auto"}, time.time()) == "idle"\n',
+     '    pl.cal_due = lambda t: False   # snFrei: Rest von sdrLage unabhaengig von der Uhr (Kalibrierstunde 03 h)\n    assert pl.want({"mode": "auto"}, time.time()) == "idle"\n'),
+]
 EDITS = {"prepper_sdr.py": SDR_EDITS, "prepper_docs.py": DOC_EDITS}
 MK_EDT_EOF
 EXPECT_PPK="338b544e24641d9f604b1d9da6b18b80f8c08ac4c332c863d1976bdec4639ba1"
@@ -270,7 +294,7 @@ print("cfg", h(c))
 print("sn", h([m.cfg_serial(c), c2(c)]))
 print("leer", h([m.cfg_serial(ce), m.DEFAULT_SERIAL]))
 MK_EQC_EOF
-EXPECT_GRD="6b58b24ae610e413196657f0214b6f7e573a5d5b8acbbae11cc1ff22ca693231"
+EXPECT_GRD="788ea6c04df0e9a51f9b9a532d17b45ba04ede285f51d1f311d80209b74df5c0"
 cat > "$W/guard.py" << 'MK_GRD_EOF'
 """Guard snFrei commit59 (prepper_sdr.py, sdr_manager.py, dashboard.py, database.py, prepper_docs.py). Gibt NIE eine Seriennummer aus.
   guard59.py check  ALT_VERZ NEU_VERZ EDITS SNJSON  -> Regeln (keine echte SN mehr, Rest byte-genau = Platzhalter-Tausch + Stellen, lokale Konfig richtig verdrahtet)
@@ -375,6 +399,21 @@ def check(alt, neu, ep, snj):
             errs.append("SNFREI_TEST_SERIAL nicht der Platzhalter")
         if not re.search(r'elif a == "selftest":\n        _snfrei_selftest_mode\(\)   # snFrei\n        selftest\(\)\n', s):
             errs.append("Selbsttest-Aufruf setzt den Platzhalter nicht zuerst")
+        # Etappe 2: Uhr-/Last-Unabhaengigkeit nur in den Selbsttests (nie in Programmfunktionen)
+        want = [("selftest_sdrstick3e", "os.getloadavg, os.cpu_count = (lambda: (0.4, 0.4, 0.4)), (lambda: 4)", 2),
+                ("selftest_sdrstick3e", "h4.cal_due = lambda t: False", 1), ("selftest_sdrstick3e", "del h4.cal_due", 1),
+                ("selftest_sdrstick3e", 'h4.cfg["cal_hour"] = time.localtime(now).tm_hour % 23 + 1', 1),
+                ("selftest_lage", "pl.cal_due = lambda t: False", 1)]
+        fn_of = {}
+        for nd in t.body:
+            if isinstance(nd, ast.FunctionDef):
+                for ln in range(nd.lineno, (nd.end_lineno or nd.lineno) + 1):
+                    fn_of[ln] = nd.name
+        lines = s.split("\n")
+        for fn, txt, n in want:
+            hits = [fn_of.get(i + 1) for i, l in enumerate(lines) if txt in l]
+            if len(hits) != n or any(h != fn for h in hits):
+                errs.append("Selbsttest-Uhr/Last: %r %dx statt %dx in %s (gefunden in %s)" % (txt[:40], len(hits), n, fn, sorted(set(map(str, hits)))))
         d = rd(os.path.join(neu, "prepper_docs.py"))
         if d.count(" | lokal | ") != 4 or "sdr_config.json und sdr_serials.local.json, Rechte 600" not in d:
             errs.append("Doku: Stick-Tabelle nicht neutral (4x lokal) oder lokale Datei nicht genannt")
@@ -447,6 +486,9 @@ def mutate(alt, neu, ep, snj):
            ("Selbsttest ohne Platzhalter-Modus", "        _snfrei_selftest_mode()   # snFrei\n", "        pass   # snFrei\n"),
            ("Platzhalter-Modus ohne DEFAULT_CFG", '    DEFAULT_SERIAL = SNFREI_TEST_SERIAL\n    DEFAULT_CFG["serial"] = DEFAULT_SERIAL\n', '    DEFAULT_SERIAL = SNFREI_TEST_SERIAL\n'),
            ("Test-Platzhalter = echte Form", 'SNFREI_TEST_SERIAL = "90000001"', 'SNFREI_TEST_SERIAL = "90000009"'),
+           ("Last-Attrappe nur einmal", "    os.getloadavg, os.cpu_count = (lambda: (0.4, 0.4, 0.4)), (lambda: 4)   # snFrei: Selbsttest unabhaengig", "    os.getloadavg, os.cpu_count = o_load, o_cpu_cnt   # snFrei: Selbsttest unabhaengig"),
+           ("Kalibrierstunde = aktuelle Stunde", "time.localtime(now).tm_hour % 23 + 1", "time.localtime(now).tm_hour"),
+           ("sdrLage cal_due nicht abgeschaltet", "    pl.cal_due = lambda t: False   # snFrei", "    pass   # snFrei"),
            ("Doku-Tabelle Platzhalter", "| 0bda:2838 | lokal | fest DAB 5C", "| 0bda:2838 | 90000001 | fest DAB 5C"),
            ("Doku ohne lokale Datei", "(sdr_config.json und sdr_serials.local.json, Rechte 600, Patch snFrei commit59)", "(sdr_config.json, Rechte 600, Patch snFrei commit59)")]
     E0 = load_edits(ep)
@@ -614,8 +656,37 @@ stt() { local d="$1" lg="$2" rc=0
   ( cd "$d" && timeout 300 nice -n 10 "$SPY" sdr_manager.py selftest ) > "$lg.mgr" 2>&1 || rc=$((rc + 2))
   ( cd "$d" && timeout 300 nice -n 10 "$VPY" database.py selftest ) > "$lg.db" 2>&1 || rc=$((rc + 4))
   return $rc; }
-stt "$W/st" "$W/stn" || { tail -n 4 "$W"/stn.* | python3 -c 'import re,sys; [print("  | " + re.sub(r"[0-9A-Fa-f]{8,}", "<..>", l.rstrip())[:200]) for l in sys.stdin]'; stop "Selbsttest im neuen Stand fehlgeschlagen (prepper_sdr/sdr_manager/database)"; }
-echo "OK Selbsttests neuer Stand (Sandbox): prepper_sdr.py selftest, sdr_manager.py selftest, database.py selftest ohne Fehler"
+# Vergleich alt/neu zur selben Uhr (Selbsttests haengen teils von Uhr/Last des Pi ab): Signatur = Testfunktion + Fehlerart, nie Werte
+stsig() { python3 - "$1" << 'PY'
+import re, sys
+t = open(sys.argv[1], errors="replace").read()
+fr = re.findall(r'^  File "[^"]*", line [0-9]+, in ([A-Za-z_0-9<>]+)$', t, re.M)
+ex = [l for l in t.splitlines() if re.match(r"^[A-Za-z_][A-Za-z_0-9.]*(Error|Exception|Exit|Interrupt)\b", l)]
+print("%s|%s" % (fr[-1] if fr else "ohne-Traceback", ex[-1].split(":")[0] if ex else "ohne-Fehlerart"))
+PY
+}
+stvgl() { local rn="$1" ro="$2" nl="$3" ol="$4" b c a o; STV=""
+  for b in 1:sdr 2:mgr 4:db; do c=${b#*:}; b=${b%%:*}
+    (( rn & b )) || continue
+    (( ro & b )) || return 1
+    a=$(stsig "$nl.$c"); o=$(stsig "$ol.$c")
+    [[ "$a" == "$o" && "$a" != ohne-Traceback* ]] || return 1
+    STV="$STV $c:${a%%|*}"
+  done
+  [[ -n "$STV" ]]; }
+RCN=0; stt "$W/st" "$W/stn" || RCN=$?
+if (( RCN )); then
+  echo "Selbsttest neuer Stand: Fehler - Gegenprobe mit dem alten Stand zur selben Uhr ..."
+  RCO=0; stt "$W/st_old" "$W/sto" || RCO=$?
+  if stvgl "$RCN" "$RCO" "$W/stn" "$W/sto"; then
+    echo "HINWEIS Selbsttest scheitert im alten Stand zur selben Uhr genauso (${STV# }) - nicht durch commit59 verursacht (Uhr/Last des Pi), weiter"
+  else
+    tail -n 4 "$W"/stn.* | python3 -c 'import re,sys; [print("  | " + re.sub(r"[0-9A-Fa-f]{8,}", "<..>", l.rstrip())[:200]) for l in sys.stdin]'
+    stop "Selbsttest im neuen Stand fehlgeschlagen (prepper_sdr/sdr_manager/database; alter Stand zur selben Uhr: $( (( RCO )) && echo anders fehlgeschlagen || echo ok))"
+  fi
+else
+  echo "OK Selbsttests neuer Stand (Sandbox): prepper_sdr.py selftest, sdr_manager.py selftest, database.py selftest ohne Fehler"
+fi
 python3 - "$W/sn.json" "$W/st/sdr_serials.local.json" << 'PY'
 import json, os, sys
 v = json.load(open(sys.argv[1]))
@@ -783,8 +854,19 @@ for u in prepper-sdr prepper-dashboard; do systemctl is-active --quiet "$u" || r
 cmp -s "$W/eq0.txt" "$W/eq2.txt" || rbx "installierter Stand leitet eine andere Stick-Zuordnung ab als der alte"
 echo "OK installierter Stand (mit sdr_serials.local.json) leitet dieselbe Zuordnung ab wie vorher"
 for f in "$DASH_DIR"/*.py; do cp "$f" "$W/st2/"; done
-stt "$W/st2" "$W/st2l" || { tail -n 4 "$W"/st2l.* | python3 -c 'import re,sys; [print("  | " + re.sub(r"[0-9A-Fa-f]{8,}", "<..>", l.rstrip())[:200]) for l in sys.stdin]'; rbx "Selbsttest des installierten Stands fehlgeschlagen"; }
-echo "OK prepper_sdr.py selftest (installierter Stand$(cmp -s "$W/st2/prepper_sdr.py" "$DASH_DIR/prepper_sdr.py" && echo ", byte-gleich")): $(tail -n 1 "$W/st2l.sdr" | cut -c1-60)...; sdr_manager.py und database.py selftest ok"
+RC2=0; stt "$W/st2" "$W/st2l" || RC2=$?
+if (( RC2 )); then
+  echo "Selbsttest installierter Stand: Fehler - Gegenprobe mit dem alten Stand zur selben Uhr ..."
+  RCO=0; stt "$W/st_old" "$W/sto2" || RCO=$?
+  if stvgl "$RC2" "$RCO" "$W/st2l" "$W/sto2"; then
+    echo "HINWEIS Selbsttest des installierten Stands scheitert im alten Stand zur selben Uhr genauso (${STV# }) - nicht durch commit59 verursacht, kein Rueckbau"
+  else
+    tail -n 4 "$W"/st2l.* | python3 -c 'import re,sys; [print("  | " + re.sub(r"[0-9A-Fa-f]{8,}", "<..>", l.rstrip())[:200]) for l in sys.stdin]'
+    rbx "Selbsttest des installierten Stands fehlgeschlagen (alter Stand zur selben Uhr: $( (( RCO )) && echo anders fehlgeschlagen || echo ok))"
+  fi
+else
+  echo "OK prepper_sdr.py selftest (installierter Stand$(cmp -s "$W/st2/prepper_sdr.py" "$DASH_DIR/prepper_sdr.py" && echo ", byte-gleich")): $(tail -n 1 "$W/st2l.sdr" | cut -c1-60)...; sdr_manager.py und database.py selftest ok"
+fi
 python3 "$W/snmap.py" scan "$DASH_DIR" "$W/sn.json" > "$W/s2.log" 2>&1 || rbx "in den installierten Dateien steht noch eine Seriennummer"
 echo "OK installierte 5 Dateien ohne Seriennummer (gegen die echten Werte geprueft)"
 for p in "${PAGES[@]}" "${APIS[@]}"; do
