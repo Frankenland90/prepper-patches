@@ -11,8 +11,10 @@ set -eEuo pipefail
 # Basis streng (sha16, Zielstand commit58): prepper_sdr.py 264ef34996e17753, sdr_manager.py 6dd122356d8f3ae1, dashboard.py 7d494c1a21e50e96, database.py e7a7ef192c522480, prepper_docs.py 43032d218135e329.
 #  Ziel: prepper_sdr.py b879ab56f4ac4736, sdr_manager.py 5a26efff608bf541, dashboard.py 2d0412bbbecc25b3, database.py 2754d0bdddca9400, prepper_docs.py 2e1e23726611b2ec.
 # Neustart: prepper-sdr und prepper-dashboard (fuer diesen Patch freigegeben), Sperre HH:55-HH:04 (Start ab HH:50 gesperrt).
-# Pruefung danach: Dienste aktiv, Stick-Zuordnung wie vorher (gleiche Geraete), prepper_sdr.py selftest, Seiten/APIs wie vorher, Journal ohne Traceback.
-# Fehler -> Rollback: 5 Dateien aus DATEI.bak-commit59-ZEIT, neue lokale Datei entfernt, beide Dienste erneut neu gestartet. Datenbank und sdr_config.json bleiben unberuehrt. Sendet nichts.
+# Stick-Status wie das Dashboard (sqlC): lagezentrum.db (state/sdr_status, nur lesen) oder sdr_status.json, der neuere Stand; frisch = unter 120 s.
+# Vorher: Zuordnung frisch, ruhig und vollstaendig (jedes Register-Geraet mit Live-Zeile), sonst STOP. Danach bis 600 s im 10-s-Takt warten.
+# Pruefung danach: Dienste aktiv, Stick-Zuordnung wie vorher (gleiche Geraete, Pruefsummen), prepper_sdr.py selftest, Seiten/APIs wie vorher, Journal ohne Traceback.
+# Fehler -> Rollback: 5 Dateien aus DATEI.bak-commit59-ZEIT, neue lokale Datei entfernt, beide Dienste erneut neu gestartet, Gegenprobe alter Stand (bis 600 s). Datenbank und sdr_config.json bleiben unberuehrt. Sendet nichts.
 COMMIT_ARG="${1:-unbekannt}"
 MODE_ARG="${2:-}"
 case "$MODE_ARG" in ""|dry-run|--dry-run|dryrun|trockenlauf) ;; *) echo "STOP: unbekannter zweiter Parameter '$MODE_ARG' (erlaubt: dry-run) - nichts geaendert"; exit 1;; esac
@@ -587,28 +589,83 @@ if [[ "$STATE" == neu ]]; then
   echo "COMMIT $COMMIT_ARG snfrei=1 fertig (schon installiert, nichts geaendert, kein Neustart)"
   exit 0
 fi
-fp() { python3 - "$DASH_DIR/sdr_status.json" << 'PY'
-import hashlib, json, sys
-try:
-    d = json.load(open(sys.argv[1]))
-except Exception:
-    print("? 0 0 0 -"); sys.exit(0)
+# Stick-Status lesen wie das Dashboard (sqlC): lagezentrum.db Tabelle state, Schluessel sdr_status (nur lesen, mode=ro) und
+# sdr_status.json (im DB-Betrieb nur Notkopie alle 10 min bzw. Ersatz); es gilt der Stand mit dem neueren Zeitstempel t (gleich: DB).
+# Ausgabe: Pruefsumme Felder vorhanden t Alter Quelle vollstaendig fehlend Einzelpruefsummen - nie Seriennummern
+fp() { python3 - "$DASH_DIR" << 'PY'
+import hashlib, json, os, sqlite3, sys, time
+base, now = sys.argv[1], time.time()
+def jload():
+    try:
+        with open(os.path.join(base, "sdr_status.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+def dload():
+    db = os.path.join(base, "lagezentrum.db")
+    if not os.path.exists(db):
+        return None
+    try:
+        from urllib.parse import quote
+        con = sqlite3.connect("file:%s?mode=ro" % quote(os.path.abspath(db)), uri=True, timeout=2.0)
+        try:
+            con.execute("PRAGMA busy_timeout=2000")
+            r = con.execute("SELECT json FROM state WHERE key=?", ("sdr_status",)).fetchone()
+        finally:
+            con.close()
+        return json.loads(r[0]) if r and r[0] else None
+    except Exception:
+        return None
+c = [(x, q) for x, q in ((dload(), "db"), (jload(), "json")) if isinstance(x, dict)]
+if not c:
+    print("? 0 0 0 999999 - 0 - -"); sys.exit(0)
+d, src = max(c, key=lambda z: (float(z[0].get("t") or 0), z[1] == "db"))
 it = [("main", d.get("sn") or d.get("serial"), d.get("pin_err") is None)]
-du = d.get("dual") or {}
+du = d.get("dual") if isinstance(d.get("dual"), dict) else {}
 for i in (1, 2, 3, 4):
     it.append(("dual%d" % i, du.get("sn%d" % i), None))
 for k in ("s2", "s3", "s4"):
-    s = d.get(k) or {}
+    s = d.get(k) if isinstance(d.get(k), dict) else {}
     it.append((k, s.get("sn"), (s.get("pin_err") is None) if s else None))
-s2 = d.get("stick2") or {}
+s2 = d.get("stick2") if isinstance(d.get("stick2"), dict) else {}
 it.append(("stick2", s2.get("serial"), s2.get("present")))
-it.append(("sticks_n", d.get("sticks_n"), None))
+miss = [] if (it[0][1] and it[0][2]) else ["main"]
+for i in (2, 3, 4):   # jedes Geraet im Register (dual snN) braucht seine Live-Zeile sN ohne pin_err
+    if du.get("sn%d" % i):
+        s = d.get("s%d" % i) if isinstance(d.get("s%d" % i), dict) else None
+        if not s or s.get("pin_err") is not None:
+            miss.append("s%d" % i)
+t = int(float(d.get("t") or 0))
 h = hashlib.sha256(json.dumps(it, sort_keys=True, default=str).encode()).hexdigest()[:16]
 per = ",".join("%s:%s" % (a, hashlib.sha256(json.dumps([b, c], default=str).encode()).hexdigest()[:12]) for a, b, c in it if b)
-print(h, sum(1 for x in it[:-1] if x[1]), sum(1 for x in it if x[2] is True), int(d.get("t") or 0), per or "-")
+print(h, sum(1 for x in it if x[1]), sum(1 for x in it if x[2] is True), t, max(0, int(now - t)), src, 0 if miss else 1, ",".join(miss) or "-", per or "-")
 PY
 }
-read -r FPA FPNA FPPA FPTA FPIA <<< "$(fp)"
+# jedes Geraet, das vorher mit Seriennummer gemeldet war, muss nachher mit derselben Seriennummer und demselben Vorhanden-Zustand gemeldet sein;
+# zusaetzlich gemeldete Eintraege sind erlaubt und werden genannt
+fpcmp() { python3 - "$1" "$2" << 'PY'
+import sys
+a = dict(x.split(":") for x in sys.argv[1].split(",") if ":" in x)
+b = dict(x.split(":") for x in sys.argv[2].split(",") if ":" in x)
+bad = [k for k in a if k not in b or b[k] != a[k]]
+add = [k for k in b if k not in a]
+print(("ABW " + " ".join(bad)) if bad else ("OK " + (" ".join(add) if add else "-")))
+PY
+}
+FPMAX=600; [[ "$SIM" == 1 && -n "${C59_SIM_FPMAX:-}" ]] && FPMAX=$C59_SIM_FPMAX
+# fpwait SEK T0: bis SEK Sekunden im 10-s-Takt auf frischen (t nach T0, Alter unter 120 s), vollstaendigen und gleichen Stand wie vorher warten
+fpwait() { local i n=$(( $1 / 10 )) t0="$2"; FPR="noch kein frischer Status"
+  for i in $(seq 0 "$n"); do
+    [[ "$i" -gt 0 ]] && sleep 10
+    read -r FP1 FPN1 FPP1 FPT1 FPAGE1 FPSRC1 FPC1 FPM1 FPI1 <<< "$(fp)"
+    if [[ "$FPT1" -gt "$t0" && "$FPAGE1" -lt 120 ]]; then
+      FPR=$(fpcmp "$FPI0" "$FPI1")
+      if [[ "$FPR" == OK* && "$FPC1" == 1 ]]; then FPW=$(( i * 10 )); return 0; fi
+      [[ "$FPC1" == 1 ]] || FPR="unvollstaendig: $FPM1; ${FPR}"
+    fi
+  done
+  FPW=$(( n * 10 )); return 1; }
+read -r FPA FPNA FPPA FPTA FPAGEA FPSRCA FPCA FPMA FPIA <<< "$(fp)"
 if [[ -e "$LOCALF" ]]; then echo "HINWEIS $LOCALF gibt es schon (wird geprueft, nicht ueberschrieben)"; fi
 [[ -w "$DASH_DIR" ]] || stop "Projektordner nicht beschreibbar"
 for f in "${FILES[@]}"; do [[ -w "$DASH_DIR/$f" ]] || stop "$f ist nicht beschreibbar"; done
@@ -715,16 +772,19 @@ APIS=(/api/sdr/ui /api/sdr/wd /api/sdr/status /api/sdr/sticktest /api/sdr/live /
 declare -A PRE
 for p in "${PAGES[@]}" "${APIS[@]}"; do PRE[$p]=$(code -L --max-redirs 5 "$B$p"); done
 echo "vorher HTTP: $(for p in "${PAGES[@]}" "${APIS[@]}"; do printf '%s=%s ' "$p" "${PRE[$p]}"; done)"
-read -r FP0 FPN0 FPP0 FPT0 FPI0 <<< "$(fp)"
-[[ "$FP0" != "?" && "$FPN0" -gt 0 ]] || { [[ "$DRY" == 1 ]] && echo "HINWEIS sdr_status.json nicht lesbar" || stop "sdr_status.json nicht lesbar - Stick-Zuordnung vorher unbekannt"; }
+read -r FP0 FPN0 FPP0 FPT0 FPAGE0 FPSRC0 FPC0 FPM0 FPI0 <<< "$(fp)"
+pre() { [[ "$DRY" == 1 ]] && echo "HINWEIS $1 (echter Lauf: STOP)" || stop "$1"; }
+[[ "$FP0" != "?" && "$FPN0" -gt 0 ]] || pre "Stick-Status nicht lesbar (lagezentrum.db und sdr_status.json) - Stick-Zuordnung vorher unbekannt"
 # Zuordnung vorher muss ruhig sein: gleiche Pruefsumme wie zu Beginn (vor der Sandbox), sonst bis 90 s auf zwei gleiche Lesungen im Abstand von 15 s warten
 if [[ "$FP0" != "$FPA" ]]; then
   echo "HINWEIS Stick-Zuordnung hat sich seit dem Start des Skripts geaendert - warte auf einen ruhigen Stand (max 90 s)"
   FPS=0
-  for i in 1 2 3 4 5 6; do sleep 15; read -r FPX FPNX FPPX FPTX FPIX <<< "$(fp)"; if [[ "$FPX" == "$FP0" ]]; then FPS=1; break; fi; FP0=$FPX; FPN0=$FPNX; FPP0=$FPPX; FPI0=$FPIX; done
-  [[ "$FPS" == 1 ]] || { [[ "$DRY" == 1 ]] && echo "HINWEIS Stick-Zuordnung schwankt gerade" || stop "Stick-Zuordnung schwankt gerade (prepper-sdr startet oder ein Stick wurde umgesteckt) - bitte in ein paar Minuten erneut starten"; }
+  for i in 1 2 3 4 5 6; do sleep 15; read -r FPX FPNX FPPX FPTX FPAGEX FPSRCX FPCX FPMX FPIX <<< "$(fp)"; if [[ "$FPX" == "$FP0" ]]; then FPS=1; break; fi; FP0=$FPX; FPN0=$FPNX; FPP0=$FPPX; FPT0=$FPTX; FPAGE0=$FPAGEX; FPSRC0=$FPSRCX; FPC0=$FPCX; FPM0=$FPMX; FPI0=$FPIX; done
+  [[ "$FPS" == 1 ]] || pre "Stick-Zuordnung schwankt gerade (prepper-sdr startet oder ein Stick wurde umgesteckt) - bitte in ein paar Minuten erneut starten"
 fi
-echo "Stick-Zuordnung vorher: $FPN0 Seriennummer-Felder belegt, $FPP0 Geraete als vorhanden gemeldet (Pruefsumme $FP0, Werte nicht ausgegeben)"
+[[ "$FPAGE0" -lt 120 ]] || pre "Stick-Status veraltet (Stand vor $FPAGE0 s, Quelle $FPSRC0) - prepper-sdr schreibt keinen frischen Status"
+[[ "$FPC0" == 1 ]] || pre "Stick-Zuordnung vorher unvollstaendig (ohne Live-Zeile oder nicht vorhanden: $FPM0) - erst wenn alle Sticks laufen erneut starten"
+echo "Stick-Zuordnung vorher: vollstaendig, $FPN0 Seriennummer-Felder belegt, $FPP0 Geraete als vorhanden gemeldet (Quelle $FPSRC0 wie Dashboard, Stand vor $FPAGE0 s; Pruefsumme $FP0, Werte nicht ausgegeben)"
 for u in prepper-dashboard prepper-sdr; do
   a=$(systemctl is-active "$u" 2>/dev/null || true)
   if [[ "$a" != active ]]; then [[ "$DRY" == 1 ]] && echo "HINWEIS Dienst $u ist nicht aktiv ($a)" || stop "Dienst $u ist nicht aktiv ($a)"; fi
@@ -759,7 +819,7 @@ jc() { sudo -n journalctl "$@" 2>/dev/null || journalctl "$@" 2>/dev/null || tru
 # ---------- 4) Installieren + Neustart ----------
 trap '' INT
 waitd() { local i; for i in $(seq 1 80); do sleep 3; systemctl is-active --quiet prepper-dashboard && [[ "$(code "$B/")" == 200 ]] && return 0; done; return 1; }
-waits() { local i st0="$1"; for i in $(seq 1 60); do sleep 2; if systemctl is-active --quiet prepper-sdr; then [[ -f "$DASH_DIR/sdr_status.json" && "$(stat -c %Y "$DASH_DIR/sdr_status.json")" -gt "$st0" ]] && return 0; fi; done; return 1; }
+waits() { local i st0="$1" x; for i in $(seq 1 60); do sleep 2; if systemctl is-active --quiet prepper-sdr; then read -r x x x FPTW x FPSRCW x <<< "$(fp)"; [[ "$FPTW" -gt "$st0" ]] && return 0; fi; done; return 1; }
 RB_DONE=0
 rb() {
   set +e +o pipefail
@@ -778,6 +838,12 @@ rb() {
     sudo systemctl start prepper-sdr.service 9>&-
     sudo systemctl restart prepper-dashboard.service 9>&-
     waitd
+    if [[ -n "${FPI0:-}" && "${FPI0:-}" != "-" ]]; then
+      echo "Gegenprobe: alter Stand nach dem Rueck-Neustart - warte bis $FPMAX s auf die Stick-Zuordnung von vorher ..."
+      local tr; tr=$(date +%s); tr=$(( tr - 5 ))
+      if fpwait "$FPMAX" "$tr"; then echo "  Gegenprobe: alter Stand nach $FPW s wieder vollstaendig wie vorher -> die Abweichung kam vom neuen Stand (commit59)"
+      else echo "  Gegenprobe: auch der alte Stand erreicht in $FPMAX s nicht die Zuordnung von vorher (${FPR}; Quelle ${FPSRC1:-?}) -> nicht durch commit59 verursacht (prepper-sdr/Sticks nach dem Neustart), bitte Diagnose"; fi
+    fi
   fi
   echo "alter Stand wieder aktiv: prepper-dashboard=$(systemctl is-active prepper-dashboard 2>/dev/null), prepper-sdr=$(systemctl is-active prepper-sdr 2>/dev/null), HTTP / = $(code "$B/")"
   echo "  Datenbank und sdr_config.json wurden nicht veraendert; beim Einspielen wurde nichts gesendet"
@@ -807,47 +873,19 @@ for f in database.py sdr_manager.py prepper_docs.py prepper_sdr.py dashboard.py;
 done
 echo "OK 5 Dateien atomar ersetzt"
 RESTARTED=1
-ST0=$(stat -c %Y "$DASH_DIR/sdr_status.json" 2>/dev/null || echo 0); [[ "$ST0" -lt "$T0D" ]] || ST0=$T0D
+ST0=$T0D
 echo "Neustart prepper-sdr - warte bis aktiv und Status neu geschrieben (max 120 s) ..."
 sudo systemctl restart prepper-sdr.service 9>&-
 waits "$ST0" || rbx "prepper-sdr nach dem Neustart nicht aktiv oder schreibt keinen Status (120 s)"
-echo "OK prepper-sdr aktiv, Status neu ($(TZ=Europe/Berlin date -d "@$(stat -c %Y "$DASH_DIR/sdr_status.json")" +%H:%M:%S))"
+echo "OK prepper-sdr aktiv, Status neu ($(TZ=Europe/Berlin date -d "@$FPTW" +%H:%M:%S), Quelle $FPSRCW)"
 echo "Neustart prepper-dashboard - warte auf HTTP 200 (max 240 s) ..."
 sudo systemctl restart prepper-dashboard.service 9>&-
 waitd || rbx "prepper-dashboard antwortet nach dem Neustart nicht (240 s)"
 echo "OK prepper-dashboard aktiv, HTTP 200"
 # ---------- 5) Pruefung ----------
-# jedes Geraet, das vorher mit Seriennummer gemeldet war, muss nachher mit derselben Seriennummer und demselben Vorhanden-Zustand gemeldet sein;
-# zusaetzlich gemeldete Eintraege (z. B. Stick 3, der vorher noch nicht im Status stand) sind erlaubt und werden genannt
-fpcmp() { python3 - "$1" "$2" << 'PY'
-import sys
-a = dict(x.split(":") for x in sys.argv[1].split(",") if ":" in x)
-b = dict(x.split(":") for x in sys.argv[2].split(",") if ":" in x)
-bad = [k for k in a if k in b and b[k] != a[k]]
-gone = [k for k in a if k not in b]
-add = [k for k in b if k not in a]
-if bad or [k for k in gone if k != "s4"]:
-    print("ABW " + " ".join(bad + gone))
-elif gone:
-    print("S4 " + (" ".join(add) if add else "-"))
-else:
-    print("OK " + (" ".join(add) if add else "-"))
-PY
-}
-FPOK=0; FPR=""
-# bis 180 s auf den vollen Stand warten; fehlt danach nur die Live-Zeile von Stick 3 (s4, eigener Planer-Faden startet spaeter), bis 300 s weiter warten
-for i in $(seq 1 100); do
-  read -r FP1 FPN1 FPP1 FPT1 FPI1 <<< "$(fp)"
-  if [[ "$FPT1" -gt "$T0D" ]]; then FPR=$(fpcmp "$FPI0" "$FPI1"); [[ "$FPR" == OK* ]] && { FPOK=1; break; }; fi
-  [[ "$i" -ge 60 && "$FPR" != S4* ]] && break
-  sleep 3
-done
-if [[ "$FPOK" == 0 && "$FPR" == S4* ]]; then
-  FPOK=1; FPR="OK ${FPR#S4 }"
-  echo "HINWEIS Stick 3: Live-Zeile (s4) nach 300 s noch nicht im Status - Zuordnung aus dem Register (dual) ist gleich; bitte spaeter auf /funk pruefen, ob Stick 3 · Hobby wieder laeuft"
-fi
-[[ "$FPOK" == 1 ]] || rbx "Stick-Zuordnung nach dem Neustart anders als vorher (vorher $FPN0 Felder/$FPP0 vorhanden, jetzt ${FPN1:-?}/${FPP1:-?}; abweichend: ${FPR#ABW }; 180 s gewartet)"
-echo "OK Stick-Zuordnung wie vorher: gleiche Geraete mit gleicher Seriennummer erkannt ($FPN0 Felder vorher, keine Abweichung; jetzt $FPN1 Felder, $FPP1 vorhanden; Werte nicht ausgegeben)"
+FPW=0
+fpwait "$FPMAX" "$T0D" || rbx "Stick-Zuordnung nach dem Neustart nicht wie vorher (vorher vollstaendig $FPN0 Felder/$FPP0 vorhanden, jetzt ${FPN1:-?}/${FPP1:-?}, Quelle ${FPSRC1:-?}; ${FPR}; $FPMAX s im 10-s-Takt gewartet)"
+echo "OK Stick-Zuordnung wie vorher und vollstaendig nach $FPW s: gleiche Geraete mit gleicher Seriennummer ($FPN0 Felder vorher; jetzt $FPN1 Felder, $FPP1 vorhanden; Quelle $FPSRC1, Stand vor $FPAGE1 s; Werte nicht ausgegeben)"
 [[ "${FPR#OK }" == "-" ]] || echo "HINWEIS nach dem Neustart zusaetzlich gemeldet (vorher noch nicht im Status): ${FPR#OK }"
 for u in prepper-sdr prepper-dashboard; do systemctl is-active --quiet "$u" || rbx "$u laeuft nicht"; done
 ( cd "$W" && PYTHONDONTWRITEBYTECODE=1 "$SPY" "$W/eqcheck.py" "$DASH_DIR" "$DASH_DIR" ) > "$W/eq2.txt" 2>"$W/eq2.err" || rbx "Vergleich installierter Stand nicht lesbar"
