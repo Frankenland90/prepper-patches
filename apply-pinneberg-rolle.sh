@@ -353,7 +353,7 @@ ready_role() {
       fc=$("${CURL[@]}" -o "$pf" -w "%{http_code}" "$B/funk" || true)
       set +e
       line=$(python3 - "$cf" "$hc" "$pf" "$fc" << 'PY'
-import sys
+import json, sys
 jp, jc, fp, fc = sys.argv[1:5]
 def rd(p):
     try:
@@ -369,13 +369,44 @@ if jc == "500" or fc == "500" or hit:
 if "Dashboard startet" in html or "Dashboard startet" in js:
     print("WAIT Startbildschirm")
     sys.exit(1)
-need = ("147300", '"alarm": false', "pinnebergBox")
-miss = [s for s in need if s not in (js if s != "pinnebergBox" else html)]
-if not miss and jc == "200" and fc == "200" and ("Empfang nicht gestartet" in js or "STOP:" in js):
-    print("READY HTTP 200 Rolle sichtbar, kein Startbildschirm, kein Alarm")
-    sys.exit(0)
-print("WAIT fehlt: " + ", ".join(miss + ([] if jc == "200" else ["HTTP "+jc])))
-sys.exit(1)
+if jc != "200" or fc != "200":
+    print("WAIT HTTP %s/%s" % (jc, fc))
+    sys.exit(1)
+try:
+    data = json.loads(js)
+except Exception:
+    print("WAIT JSON noch nicht lesbar")
+    sys.exit(1)
+if not isinstance(data, dict):
+    print("FAIL JSON ist kein Objekt")
+    sys.exit(2)
+def bad(msg):
+    print("FAIL " + msg)
+    sys.exit(2)
+if data.get("alarm") is not False:
+    bad("alarm ist nicht der Wahrheitswert false")
+if data.get("empfang") is not False or data.get("bias_tee") is not False:
+    bad("Empfang oder Bias-Tee ist nicht false")
+if data.get("rf_hz") != 147300 or data.get("if_hz") != 120147300:
+    bad("Frequenz ist nicht 147300 Hz und 120147300 Hz")
+if data.get("stufe") != 1:
+    bad("Stufe ist nicht 1")
+code = data.get("code")
+txt = data.get("txt") if isinstance(data.get("txt"), str) else ""
+if code == "bereit":
+    if "Empfang nicht gestartet" not in txt:
+        bad("bereit ohne den Satz Empfang nicht gestartet")
+elif code == "stop":
+    if not txt.startswith("STOP"):
+        bad("stop ohne STOP-Text")
+elif code == "aus":
+    bad("Rolle ist aus, obwohl die Datei installiert ist")
+else:
+    bad("Rolle unbekannt")
+if "pinnebergBox" not in html:
+    bad("Kachel pinnebergBox fehlt auf der echten Seite")
+print("READY HTTP 200 Rolle %s, alarm false, 147300 Hz, Kachel da" % code)
+sys.exit(0)
 PY
 )
       pyrc=$?
@@ -396,8 +427,7 @@ if [[ "$STATE" == neu ]]; then
     echo "COMMIT offen pinnebergrolle=1 fertig (schon installiert) variante=$VARIANT lage=${LH0:0:16}"
     exit 0
   fi
-  cat "$W/role-wait.log"
-  stop "$MK ist in den Dateien, aber /api/pinneberg zeigt die Rolle nicht."
+  stop "$MK ist in den Dateien, aber /api/pinneberg zeigt die Rolle nicht. Details: $W/role-wait.log"
 fi
 rswin() { local m=$(( $1 / 60 % 60 )); [[ $m -ge 55 || $m -lt 5 ]]; }
 rssec() { local hm; if [[ -n "${C61_FAKE_HM:-}" && "$SIM" == 1 ]]; then hm="$C61_FAKE_HM"; echo $(( 10#${hm%%:*} * 3600 + 10#${hm##*:} * 60 + $1 )); return; fi
@@ -473,7 +503,7 @@ RESTARTED=1
 echo "Neustart nur prepper-dashboard. prepper-sdr bleibt, damit kein Stick umgestimmt wird."
 sudo systemctl restart prepper-dashboard.service 9>&-
 ready_role && rc=0 || rc=$?
-if [[ "$rc" -ne 0 ]]; then cat "$W/role-wait.log"; rbx "Rolle nach dem Neustart nicht sichtbar"; fi
+if [[ "$rc" -ne 0 ]]; then rbx "Rolle nach dem Neustart nicht sichtbar"; fi
 for p in "${PAGES[@]}" "${APIS[@]}"; do
   c=$(code_r -L --max-redirs 5 "$B$p")
   [[ "$c" == "${PRE[$p]}" ]] || rbx "$p antwortet $c (vorher ${PRE[$p]})"
