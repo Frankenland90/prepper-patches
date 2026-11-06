@@ -64,8 +64,11 @@ if [[ "$SIM" == 1 && "$PORT" != "5093" ]]; then stop "Simulation nur auf Port 50
 if [[ "$SIM" == 0 && "$PORT" != "5000" ]]; then stop "Echter Lauf nur auf Port 5000 (jetzt $PORT)"; fi
 B="http://127.0.0.1:${PORT}"
 CURL=(curl --compressed -s --connect-timeout 3 --max-time 40)
-[[ -x "$VPY" ]] || VPY=python3
-[[ -x "$SPY" ]] || SPY=python3
+[[ -x "$SPY" ]] || stop "System-Python $SPY fehlt oder ist nicht ausfuehrbar"
+if [[ ! -x "$VPY" ]]; then stop "Dashboard-venv $VPY fehlt oder ist nicht ausfuehrbar. Kein Rueckfall auf das System-Python."; fi
+if ! "$VPY" -c 'import flask,sys; assert sys.version_info>=(3,9); assert sys.prefix!=sys.base_prefix, sys.prefix'; then
+  stop "Dashboard-venv $VPY laedt Flask nicht oder ist kein eigenes venv. Nichts wird nachinstalliert und nichts auf $SPY umgebogen."
+fi
 for t in python3 sha256sum curl flock cp mv cmp stat date timeout nice base64; do command -v "$t" >/dev/null 2>&1 || stop "Werkzeug $t fehlt"; done
 s16() { sha256sum "$1" | cut -c1-16; }
 sfull() { sha256sum "$1" | cut -d' ' -f1; }
@@ -306,16 +309,16 @@ role_import() {
   find "$DASH_DIR" -maxdepth 1 -name '*.py' -exec ln -s {} "$W/try/" \;
   rm -f "$W/try/dashboard.py" "$W/try/prepper_docs.py" "$W/try/prepper_sdr.py" "$W/try/pinneberg_rolle.py"
   cp "$W/neu/dashboard.py" "$W/neu/prepper_docs.py" "$W/neu/prepper_sdr.py" "$W/neu/pinneberg_rolle.py" "$W/try/"
-  for py in "$SPY" "$VPY"; do
-    log="$W/imp-$(basename "$py")-$$.log"
-    ( cd "$W/try" && PYTHONDONTWRITEBYTECODE=1 timeout 180 "$py" -c 'import pinneberg_rolle,prepper_sdr,dashboard; print(pinneberg_rolle.selftest()); print(prepper_sdr.selftest_sdrstick3e())' ) > "$log" 2>&1 || { tail -n 40 "$log"; stop "Import mit $py fehlgeschlagen"; }
-    grep -q "pinnebergRolle Stufe 1 ok" "$log" || { tail -n 20 "$log"; stop "Rollentest fehlt ($py)"; }
-    grep -q "selftest sdrStick3e ok" "$log" || stop "Stick-3-Selbsttest fehlt ($py)"
-    grep -q "pinnebergRolle aktiv:" "$log" || stop "Anzeige-Selbsttest fehlt ($py)"
-    grep -q "audioKern aktiv:" "$log" || stop "Audio-Selbsttest fehlt ($py)"
-    if grep -q "rtl_fm" "$W/neu/pinneberg_rolle.py"; then stop "Rolle enthaelt rtl_fm"; fi
-  done
-  echo "OK Import: Rolle, Stick-3-Planer, Anzeige und Audio. Kein Geraet geoeffnet, nichts gesendet."
+  if grep -q "rtl_fm" "$W/neu/pinneberg_rolle.py"; then stop "Rolle enthaelt rtl_fm"; fi
+  slog="$W/imp-system.log"
+  ( cd "$W/try" && PYTHONDONTWRITEBYTECODE=1 timeout 120 "$SPY" -c 'import pinneberg_rolle,prepper_sdr; print(pinneberg_rolle.selftest()); print(prepper_sdr.selftest_sdrstick3e())' ) > "$slog" 2>&1 || { tail -n 40 "$slog"; stop "Abhaengigkeitsfreier Selbsttest mit System-Python $SPY fehlgeschlagen"; }
+  grep -q "pinnebergRolle Stufe 1 ok" "$slog" || { tail -n 20 "$slog"; stop "Rollentest fehlt ($SPY)"; }
+  grep -q "selftest sdrStick3e ok" "$slog" || stop "Stick-3-Selbsttest fehlt ($SPY)"
+  vlog="$W/imp-venv.log"
+  ( cd "$W/try" && PYTHONDONTWRITEBYTECODE=1 timeout 180 "$VPY" -c 'import dashboard' ) > "$vlog" 2>&1 || { tail -n 40 "$vlog"; stop "Import dashboard mit der Dashboard-venv $VPY fehlgeschlagen"; }
+  grep -q "pinnebergRolle aktiv:" "$vlog" || stop "Anzeige-Selbsttest fehlt ($VPY)"
+  grep -q "audioKern aktiv:" "$vlog" || stop "Audio-Selbsttest fehlt ($VPY)"
+  echo "OK System-Python $SPY: Rolle und Stick-3-Planer ohne Flask. Dashboard-venv $VPY: Anzeige und Audio. Kein Geraet geoeffnet, nichts gesendet."
 }
 role_import
 code() { local c; c=$("${CURL[@]}" "$@" -o /dev/null -w "%{http_code}" || true); [[ -z "$c" ]] && c=000; echo "$c"; }

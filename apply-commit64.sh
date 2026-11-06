@@ -62,8 +62,11 @@ if [[ "$SIM" == 1 && "$PORT" != "5093" ]]; then stop "Simulation nur auf Port 50
 if [[ "$SIM" == 0 && "$PORT" != "5000" ]]; then stop "Echter Lauf nur auf Port 5000 (jetzt $PORT)"; fi
 B="http://127.0.0.1:${PORT}"
 CURL=(curl --compressed -s --connect-timeout 3 --max-time 40)
-[[ -x "$VPY" ]] || VPY=python3
-[[ -x "$SPY" ]] || SPY=python3
+[[ -x "$SPY" ]] || stop "System-Python $SPY fehlt oder ist nicht ausfuehrbar"
+if [[ ! -x "$VPY" ]]; then stop "Dashboard-venv $VPY fehlt oder ist nicht ausfuehrbar. Kein Rueckfall auf das System-Python."; fi
+if ! "$VPY" -c 'import flask,sys; assert sys.version_info>=(3,9); assert sys.prefix!=sys.base_prefix, sys.prefix'; then
+  stop "Dashboard-venv $VPY laedt Flask nicht oder ist kein eigenes venv. Nichts wird nachinstalliert und nichts auf $SPY umgebogen."
+fi
 for t in python3 sha256sum curl flock cp mv cmp stat date timeout nice base64; do command -v "$t" >/dev/null 2>&1 || stop "Werkzeug $t fehlt"; done
 s16() { sha256sum "$1" | cut -c1-16; }
 sfull() { sha256sum "$1" | cut -d' ' -f1; }
@@ -305,16 +308,15 @@ voice_import() {
   rm -f "$W/try/dashboard.py" "$W/try/prepper_docs.py"
   cp "$W/neu/dashboard.py" "$W/try/dashboard.py"
   cp "$W/neu/prepper_docs.py" "$W/try/prepper_docs.py"
-  for py in "$SPY" "$VPY"; do
-    log="$W/imp-$(basename "$py").log"
-    ( cd "$W/try" && PYTHONDONTWRITEBYTECODE=1 timeout 120 "$py" -c 'import dashboard' ) > "$log" 2>&1 || { tail -n 40 "$log"; stop "Import dashboard mit $py fehlgeschlagen"; }
-    if grep -q "audioKern Selbsttest FEHLER" "$log"; then tail -n 30 "$log"; stop "audioKern-Selbsttest fehlgeschlagen ($py)"; fi
-    grep -q "Stimme mb-de7 nur mit lokaler Datei" "$log" || { tail -n 20 "$log"; stop "Stimmtest fehlt ($py)"; }
-    grep -q "teil4 selftest ok" "$log" || stop "teil4-Selbsttest fehlt ($py)"
-    grep -q "usvAlarm ok" "$log" || stop "usvAlarm-Selbsttest fehlt ($py)"
-    grep -q "usvShutdown ok" "$log" || stop "usvShutdown-Selbsttest fehlt ($py)"
-  done
-  echo "OK Import-Selbsttest mit Ersatzprozessen: mb-de7, Fehler, Zeitlimit, Abbruch, espeak-Rueckfall; teil4 und USV unveraendert ($SPY und $VPY). Keine echte Wiedergabe."
+  # System-Python bleibt bei Syntax, Guard und ups_manager. Dashboard-Import braucht Flask und laeuft nur in der venv.
+  log="$W/imp-venv.log"
+  ( cd "$W/try" && PYTHONDONTWRITEBYTECODE=1 timeout 120 "$VPY" -c 'import dashboard' ) > "$log" 2>&1 || { tail -n 40 "$log"; stop "Import dashboard mit der Dashboard-venv $VPY fehlgeschlagen"; }
+  if grep -q "audioKern Selbsttest FEHLER" "$log"; then tail -n 30 "$log"; stop "audioKern-Selbsttest fehlgeschlagen ($VPY)"; fi
+  grep -q "Stimme mb-de7 nur mit lokaler Datei" "$log" || { tail -n 20 "$log"; stop "Stimmtest fehlt ($VPY)"; }
+  grep -q "teil4 selftest ok" "$log" || stop "teil4-Selbsttest fehlt ($VPY)"
+  grep -q "usvAlarm ok" "$log" || stop "usvAlarm-Selbsttest fehlt ($VPY)"
+  grep -q "usvShutdown ok" "$log" || stop "usvShutdown-Selbsttest fehlt ($VPY)"
+  echo "OK Import-Selbsttest nur in der Dashboard-venv ($VPY): mb-de7, Fehler, Zeitlimit, Abbruch, espeak-Rueckfall; teil4 und USV unveraendert. System-Python $SPY importiert dashboard nicht. Keine echte Wiedergabe."
 }
 voice_import
 code() { local c; c=$("${CURL[@]}" "$@" -o /dev/null -w "%{http_code}" || true); [[ -z "$c" ]] && c=000; echo "$c"; }
