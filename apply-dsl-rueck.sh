@@ -1,10 +1,11 @@
 #!/bin/bash
 # shellcheck disable=SC2015
 set -euo pipefail
-# dslRueck: DSL-Voralarm in der Lage-Ampel endet, wenn der Uplink wieder Telekom ist,
-# frisch (nicht stale) und seit 300 s ohne laufenden Wechsel. NETZ, SDR_OFFLINE,
-# Echtalarm und NINA bleiben. Stick 2 bleibt gekapert, bis der bestehende Knopf
-# "SDR 2 freigeben" (Telekom + 5 min stabile Frequenz) gedrueckt wird.
+# dslRueck: DSL-Voralarm in der Lage-Ampel endet nur, wenn der Uplink wieder Telekom ist,
+# frisch (nicht stale), seit 300 s ohne laufenden Wechsel, und die bestehende
+# Frequenzpruefung t4_freq_eval stabil ist (300 s im Band 49,950-50,050 Hz).
+# NETZ, SDR_OFFLINE, Echtalarm und NINA bleiben. pre.on bleibt an. Stick 2 bleibt
+# gekapert, bis der bestehende Knopf "SDR 2 freigeben" gedrueckt wird.
 # Kein Loeschen von teil4_state.json / uplink_state.json, kein Mesh-Versand.
 # Aufruf auf dem Pi: bash apply-dsl-rueck.sh dslRueck
 # Nur Tests:        bash apply-dsl-rueck.sh --selftest
@@ -18,21 +19,23 @@ ROOT=$(cd "$(dirname "$0")" && pwd)
 
 cat > "$W/patch.py" << 'ENDPY'
 # -*- coding: utf-8 -*-
-"""dslRueck: nur die DSL-Art aus dem gespeicherten Vor-Alarm nehmen, wenn Telekom frisch und gehalten ist."""
+"""dslRueck: nur die DSL-Art nehmen, wenn Telekom frisch gehalten ist und t4_freq_eval stabil ist."""
 import ast
 import os
 import re
 import sys
 
-HOLD = 300  # Sekunden current=telekom, identisch zu STALE_SEC / T4_F_STABLE_S als Halt, nicht als Frequenzbedingung
+HOLD = 300  # gehaltener Telekom-Pfad; Frequenzstabilitaet kommt aus t4_freq_eval (T4_F_STABLE_S)
 
 HELPERS = '''
-# dslRueck: DSL-Voralarm der Ampel endet bei gehaltenem Telekom. NETZ bleibt. Stick 2 nur per Knopf.
+# dslRueck: DSL-Art endet bei gehaltenem Telekom und stabiler Frequenz (t4_freq_eval). NETZ bleibt. Stick 2 nur per Knopf.
 T4_DSL_RECOVER_S = 300
 
-def _t4_dsl_recovered(us, now):
-    """True nur bei current telekom, stale genau False, kein laufender Wechsel, since >= 300 s."""
+def _t4_dsl_recovered(us, freq, now):
+    """True nur bei current telekom, stale genau False, kein Wechsel, since >= 300 s und freq.stable genau True."""
     if not isinstance(us, dict) or us.get("current") != "telekom" or us.get("stale") is not False:
+        return False
+    if not isinstance(freq, dict) or freq.get("stable") is not True:
         return False
     pend = us.get("pending")
     if pend not in (None, "", "telekom"):
@@ -90,9 +93,10 @@ NEW = (
     '        st["dsl_handled"] = e["t"]\n'
     '        if not _t4_pre_on("DSL", "Telekom -> Starlink um %s" % _t4_time.strftime("%H:%M", _t4_time.localtime(e["t"])), now):\n'
     '            _t4_save()\n'
-    '    if _t4_dsl_recovered(us, now) and _t4_dsl_drop(st, now):  # dslRueck\n'
+    '    fe = _lz_mgr.t4_freq_eval(list(_T4["fs"]), now)\n'
+    '    if _t4_dsl_recovered(us, fe, now) and _t4_dsl_drop(st, now):  # dslRueck\n'
     '        _t4_save()\n'
-    '        _t4_event("VORALARM", "dsl-ende", "info", "DSL-Voralarm beendet: Telekom gehalten und frisch, Stick 2 bleibt bis zur Freigabe", now)\n'
+    '        _t4_event("VORALARM", "dsl-ende", "info", "DSL-Voralarm beendet: Telekom gehalten und Frequenz stabil, Stick 2 bleibt bis zur Freigabe", now)\n'
     '        _t4_say("teil4: DSL-Voralarm beendet (Telekom zurueck). Stick 2 nicht automatisch freigegeben")\n'
 )
 
@@ -101,7 +105,7 @@ def patch_text(text):
     if not isinstance(text, str):
         raise SystemExit("dslRueck: Dashboard-Text fehlt")
     has_fn = "def _t4_dsl_recovered(" in text
-    has_call = "_t4_dsl_recovered(us, now) and _t4_dsl_drop(st, now)" in text
+    has_call = "_t4_dsl_recovered(us, fe, now) and _t4_dsl_drop(st, now)" in text
     if has_fn or has_call or "\n# dslRueck:" in text:
         if has_fn and has_call and text.count("def _t4_dsl_recovered(") == 1 and text.count("def _t4_dsl_drop(") == 1 and text.count(OLD) == 0:
             return text, "schon"
@@ -141,7 +145,8 @@ def _banner_ns(teil4_path):
         "is_own_test": lambda t: "keine echte Warnung" in str(t),
         "is_probe": lambda t: "Probe" in str(t) or "Probewarnung" in str(t),
     }
-    exec(head + _extract(src, "t4_level") + _extract(src, "t4_dsl_edge"), ns)
+    ns["time"] = __import__("time")
+    exec(head + _extract(src, "t4_level") + _extract(src, "t4_freq_eval") + _extract(src, "t4_dsl_edge") + _extract(src, "t4_release_ok"), ns)
     return ns
 
 
@@ -157,21 +162,26 @@ def selftest():
     def tele(since, stale=False, pending=None, current="telekom"):
         return {"current": current, "stale": stale, "pending": pending, "since": since, "history": []}
 
-    assert rec(tele(now - HOLD), now) is True
-    assert rec(tele(now - HOLD + 1), now) is False          # noch nicht gehalten
-    assert rec(tele(now - 7200), now) is True               # Stunden spaeter, weiter Telekom
-    assert rec(tele(now - 7200, stale=True), now) is False  # veraltet
-    assert rec(tele(now - 7200, stale=None), now) is False  # stale unbekannt
-    assert rec({"current": "telekom", "since": now - 7200}, now) is False
-    assert rec(tele(now - 7200, current="starlink"), now) is False
-    assert rec(tele(now - 7200, current="unclear"), now) is False
-    assert rec(tele(now - 7200, current=None), now) is False
-    assert rec(None, now) is False
-    assert rec(tele(now - 7200, pending="starlink"), now) is False
-    assert rec(tele(now - 7200, pending="unclear"), now) is False
-    assert rec(tele(now - 7200, pending="telekom"), now) is True
-    assert rec(tele(True), now) is False                    # since bool
-    assert rec(tele(None), now) is False
+    okf = {"stable": True}
+    assert rec(tele(now - HOLD), okf, now) is True
+    assert rec(tele(now - HOLD + 1), okf, now) is False          # noch nicht gehalten
+    assert rec(tele(now - 7200), okf, now) is True               # Stunden spaeter, weiter Telekom
+    assert rec(tele(now - 7200, stale=True), okf, now) is False  # veraltet
+    assert rec(tele(now - 7200, stale=None), okf, now) is False  # stale unbekannt
+    assert rec({"current": "telekom", "since": now - 7200}, okf, now) is False
+    assert rec(tele(now - 7200, current="starlink"), okf, now) is False
+    assert rec(tele(now - 7200, current="unclear"), okf, now) is False
+    assert rec(tele(now - 7200, current=None), okf, now) is False
+    assert rec(None, okf, now) is False
+    assert rec(tele(now - 7200, pending="starlink"), okf, now) is False
+    assert rec(tele(now - 7200, pending="unclear"), okf, now) is False
+    assert rec(tele(now - 7200, pending="telekom"), okf, now) is True
+    assert rec(tele(True), okf, now) is False                    # since bool
+    assert rec(tele(None), okf, now) is False
+    assert rec(tele(now - HOLD), {"stable": False}, now) is False
+    assert rec(tele(now - HOLD), None, now) is False
+    assert rec(tele(now - HOLD), {}, now) is False
+    assert rec(tele(now - HOLD), {"stable": 1}, now) is False
 
     def pre(kinds, why, on=True):
         return {"pre": {"on": on, "kinds": list(kinds), "since": now - 8000, "why": why},
@@ -219,7 +229,9 @@ def t4_dsl_edge(us, handled_t, now=None):
     exec(edge_src, ens)
     edge = ens["t4_dsl_edge"]
 
-    def latch(st, us, t):
+    def latch(st, us, t, freq=None):
+        if freq is None:
+            freq = okf
         e = edge(us, st.get("dsl_handled"), t)
         if e and "DSL" not in st["pre"]["kinds"]:
             st["dsl_handled"] = e["t"]
@@ -227,7 +239,7 @@ def t4_dsl_edge(us, handled_t, now=None):
             st["pre"]["kinds"] = sorted(set(st["pre"]["kinds"] + ["DSL"]))
             st["pre"]["since"] = st["pre"].get("since") or e["t"]
             st["pre"]["why"] = (st["pre"].get("why") + "; " if st["pre"].get("why") else "") + "Telekom -> Starlink um 01:09"
-        if rec(us, t) and drop(st, t):
+        if rec(us, freq, t) and drop(st, t):
             return "cleared"
         return "held"
 
@@ -242,6 +254,7 @@ def t4_dsl_edge(us, handled_t, now=None):
     assert latch(st, tele(now - HOLD, stale=True), now) == "held"
     assert latch(st, {"current": None, "stale": False, "since": now - HOLD}, now) == "held"
     assert latch(st, {"current": "unclear", "stale": False, "since": now - HOLD, "pending": None}, now) == "held"
+    assert latch(st, tele(now - HOLD), now, {"stable": False}) == "held" and "DSL" in st["pre"]["kinds"]
     assert latch(st, tele(now - HOLD), now) == "cleared"
     assert st["pre"]["on"] is True and st["pre"]["kinds"] == [] and "DSL" not in st["pending"]
     # neuer Ausfall nach der Ruecknahme loest wieder aus
@@ -274,6 +287,17 @@ def t4_dsl_edge(us, handled_t, now=None):
         assert off["label"] == "SDR_OFFLINE" and "DSL" not in off["why"]
         off_dsl = level("SDR_OFFLINE", [], pd)
         assert "DSL" in off_dsl["why"] and off_dsl["label"] == "SDR_OFFLINE"
+        fev = b["t4_freq_eval"]
+        samples = [(now - 400 + 25 * i, 50.0) for i in range(17)]
+        stable = fev(samples, now)
+        shaky = fev(samples[:8] + [(now - 200, 49.94)] + samples[9:], now)
+        gappy = fev(samples[:-6] + samples[-3:], now)
+        assert stable["stable"] is True and shaky["stable"] is False and gappy["stable"] is False
+        assert rec(tele(now - HOLD), stable, now) is True
+        assert rec(tele(now - HOLD), shaky, now) is False
+        assert rec(tele(now - HOLD), gappy, now) is False
+        assert b["t4_release_ok"]({"current": "telekom", "stale": False}, stable)[0] is True
+        assert b["t4_release_ok"]({"current": "telekom", "stale": False}, shaky)[0] is False
         # Anker aus dem ausgelieferten teil4-Block laesst sich einbauen und bleibt beim zweiten Mal gleich
         i = raw.find("def _t4_pre_tick(now):")
         j = raw.find("\ndef _t4_release_state(", i)
