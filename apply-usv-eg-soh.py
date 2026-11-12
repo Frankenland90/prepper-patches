@@ -12,6 +12,7 @@ KEEP = {
     "prepper_sdr.py": "533b6f9db8da0bcb73ca0e956bfc7a2edfade287375aa4eaf21f10a4ab37fb32",
     "pinneberg_rolle.py": "981cacdbf5a81348f9b32f67ac1c9ca27382af916d340c3b7773a84e87df06f5",
 }
+DASH_DSL = "dcb452f3cefef258"
 UNBERUEHRT = ("usv_eg.json", "usv_state.json", "usv_eg_learn.json")
 
 def load():
@@ -128,6 +129,11 @@ def sichern(path: Path, data: bytes):
             pass
     return bak
 
+def keep_ok(name: str, digest: str) -> bool:
+    if name == "dashboard.py":
+        return digest == KEEP["dashboard.py"] or digest.startswith(DASH_DSL)
+    return digest == KEEP[name]
+
 def fingerprints(ordner: Path):
     return {name: sha((ordner/name).read_bytes()) if (ordner/name).is_file() else None for name in UNBERUEHRT}
 
@@ -137,10 +143,17 @@ def apply_dir(ordner: Path, dry: bool, kein: bool, pairs, ups, docs) -> int:
         if pfad.is_symlink() or not pfad.is_file():
             print("STOP: %s fehlt" % pfad.name)
             return 2
-    for name, soll in KEEP.items():
+    dash_before = None
+    for name in KEEP:
         pfad = ordner/name
-        if not pfad.is_file() or sha(pfad.read_bytes()) != soll:
-            print("STOP: %s ist nicht die installierte Stufe 1" % name)
+        if not pfad.is_file():
+            print("STOP: %s fehlt" % name)
+            return 2
+        roh = pfad.read_bytes()
+        if name == "dashboard.py":
+            dash_before = roh
+        if not keep_ok(name, sha(roh)):
+            print("STOP: %s %s ist nicht die installierte Stufe 1" % (name, sha(roh)[:16]))
             return 2
     u, d, l = pfade["ups_manager.py"].read_bytes(), pfade["prepper_docs.py"].read_bytes(), pfade["lage_pages.py"].read_bytes()
     us, ds = sha(u), sha(d)
@@ -193,6 +206,9 @@ def apply_dir(ordner: Path, dry: bool, kein: bool, pairs, ups, docs) -> int:
     if fingerprints(ordner) != vorher or sha(pfade["ups_manager.py"].read_bytes()) != ups["neu_sha"]:
         print("STOP: Config, Lernstand oder Hash nach dem Schreiben falsch")
         return 3
+    if (ordner/"dashboard.py").read_bytes() != dash_before:
+        print("STOP: dashboard.py wurde veraendert")
+        return 3
     print("geschrieben. Fremde Lage-Bytes, usv_eg.json und Spitzboden-Zustand unveraendert.")
     if kein:
         print("Kein Neustart in dieser Pruefung.")
@@ -223,6 +239,10 @@ def selftest() -> int:
     assert rest(lage, pairs, False) == rest(neu, pairs, True)
     assert b"FREMD-DSL-GAS" in neu and lage_stand(neu, pairs)[0] == "neu"
     assert lage_stand(b"unbekannt\n", pairs)[0] == "halt"
+    assert keep_ok("dashboard.py", KEEP["dashboard.py"])
+    assert keep_ok("dashboard.py", DASH_DSL + "ab" * 24)
+    assert not keep_ok("dashboard.py", "aaaaaaaaaaaaaaaa" + "00" * 24)
+    assert not keep_ok("prepper_sdr.py", DASH_DSL + "ab" * 24)
     assert fenster(datetime(2026, 11, 7, 12, 10))[0]
     assert not fenster(datetime(2026, 11, 7, 23, 50))[0]
     assert not fenster(datetime(2026, 11, 7, 0, 2))[0]
