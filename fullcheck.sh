@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fullcheck.sh - Gesamtpruefung "Lage Pi" (BND-Prepper): Pi, Dienste, Dashboard, Patch-Stand (bis commit47), NINA-Zertifikatskette, Mesh, SDR, DB, Backups, Sicherheit, Journal
+# fullcheck.sh - Gesamtpruefung "Lage Pi" (BND-Prepper): Pi, Dienste, Dashboard, Patch-Stand (Apply-Basis 14.11.2026), NINA, Mesh, SDR, USV, Uplink, Blackout-Radar, DB, Backups, Sicherheit, Journal
 # Aufruf:  bash fullcheck.sh [--kurz] [--json] [--sudo] [--no-color] [--help] | --selftest | --version      (auch: bash ~/fullcheck.sh)
 # Strikt nur lesend: aendert nichts am System, am Projekt, am Dashboard oder an der Datenbank, startet nichts neu, sendet nichts (kein Mesh, kein Telegram,
 # keine Alarme, keine Mail, keine POSTs), oeffnet keine SDR-Sticks, scannt kein Netz, zeigt nie Schluessel/Passwoerter/Tokens, schreibt keine Dateien (auch keine temporaeren).
@@ -11,14 +11,21 @@ export TZ=Europe/Berlin
 export PYTHONDONTWRITEBYTECODE=1
 export PATH="${PATH:-/usr/bin:/bin}:/usr/sbin:/sbin:/usr/local/bin"
 
-FC_VERSION="2.0.2"
+FC_VERSION="2.1.0"
 T0=$SECONDS
 
 # ---------------------------------------------------------------- Konfiguration (Umgebungsvariablen FC_* nur fuer Tests/Sonderfaelle)
 APP="${FC_APP:-/home/fmg/prepper-dashboard}"
 BACKUPS="${FC_BACKUPS:-/home/fmg/prepper-backups}"
 HOSTN="${FC_HOST:-127.0.0.1}"
-PORT="${FC_PORT:-5000}"
+# Port: FC_PORT gewinnt, sonst nur die Zeile PORT=<Zahl> aus config.py (keine andere Zeile, keine Secrets), sonst 5000. 8080 ist Kiwix, nie das Dashboard.
+PORT="${FC_PORT:-}"
+if [[ -z "$PORT" && -r "$APP/config.py" ]]; then
+  _pline="$(grep -E '^[[:space:]]*PORT[[:space:]]*=[[:space:]]*[0-9]+' "$APP/config.py" 2>/dev/null | head -n 1 || true)"
+  if [[ "$_pline" =~ PORT[[:space:]]*=[[:space:]]*([0-9]+) ]]; then PORT="${BASH_REMATCH[1]}"; PORT_SRC="config.py"; fi
+fi
+if [[ -z "$PORT" ]]; then PORT=5000; PORT_SRC="${PORT_SRC:-Vorgabe 5000}"; elif [[ -n "${FC_PORT:-}" ]]; then PORT_SRC="FC_PORT"; fi
+PORT_SRC="${PORT_SRC:-config.py}"
 BR1_PORT="${FC_BRIDGE1_PORT:-5001}"
 BR2_PORT="${FC_BRIDGE2_PORT:-5002}"
 NTP_HOST="${FC_NTP_HOST:-192.168.178.15}"
@@ -26,7 +33,17 @@ GPSD_PORT="${FC_GPSD_PORT:-2947}"
 PROC="${FC_PROC:-/proc}"
 SYS="${FC_SYS:-/sys}"
 DROPIN_DIR="${FC_DROPIN_DIR:-/etc/systemd/system/prepper-dashboard.service.d}"
-DASH_SHA16="${FC_DASH_SHA16:-74ac7bfd0eebd4e0}"   # Soll nach commit47 speedAsync (31.10.2026), 22340 Zeilen; vorher bb94f52af6e03c3b nach commit37
+# Soll-sha16 aus apply-blackout-radar-7.py (prepper-patches, 14.11.2026): dashboard.py, lage_pages.py und
+# pushover_push.py stehen in CHECK, nicht in PATCH, und sind damit der Endstand nach Schritt 6 und 7.
+# blackout_radar.py aendert Schritt 7; der End-sha16 steht nicht im Skript (nur die Basis davor). Nicht raten.
+DASH_SHA16="${FC_DASH_SHA16:-239bdf4d0f761325}"
+DASH_BYTES="${FC_DASH_BYTES:-1392013}"
+LAGE_SHA16="${FC_LAGE_SHA16:-e9ea014b5a4ff121}"
+LAGE_BYTES="${FC_LAGE_BYTES:-230936}"
+PUSH_SHA16="${FC_PUSH_SHA16:-2267a556ab7bb27f}"
+PUSH_BYTES="${FC_PUSH_BYTES:-12129}"
+BOR6_SHA16="${FC_BOR6_SHA16:-7a363f4723032c15}"
+BOR6_BYTES="${FC_BOR6_BYTES:-74404}"
 PYBIN="${FC_PY:-python3}"
 VENV_PY="${FC_VENV_PY:-$APP/venv/bin/python}"
 BUDGET_S="${FC_BUDGET_S:-50}"                      # nach so vielen Sekunden werden restliche Seitentests uebersprungen
@@ -37,13 +54,18 @@ SERVICES=(prepper-dashboard prepper-sdr mesh-bridge mesh-bridge-bayern)
 PAGES=(/ /funk /pi /umwelt /funk433 /aprs /meteor /rundfunk /energie /dabhist /mesh /karte
        /api/sdr/ui /api/sdr/wd /api/br24 /api/sdr/sticktest /api/sdr/live /api/sdr/map /api/broadcast/events
        /api/t2/status /api/t3/status /api/t4/status /api/t4/map /api/t4/tii /api/meteor /api/sdr/status)
+# Weitere Kacheln/Seiten und GET-APIs. HTTP 404 = nicht installiert, keine Punkte. Kein POST, kein /api/download_test.
+OPT_GETS=(/lokale-energie /speicher /luft /pegel /adsb /zuhause /mesh2 /news /medizin /system
+          /api/usv /api/blackout/radar /api/audio/status /api/archive/status /api/sd_health /api/clone/status /api/geo/status /api/funk/harden /api/speedtest)
 MARKERS=(relHygiene perfKeep sameOrigin alarmFaden relWatch dbVis mapUi modDead secXmlDash wxSlot meshBootQuiet funkHarden2 kartevec clockOff ninaFix hideTexts longArchive relStop asyncMini pagesSplit1 pagesSplit2 pagesSplit3 pegelSplit perfWsgi perf03Cache speedAsync)   # je genau 1x "# ===== <Name>:"
 NINA_PEM_REL="certs/sectigo-e36.pem"; NINA_PEM_DER16="873f0ba8"   # DER-sha256 beginnt so (Sectigo Public Server Authentication CA DV E36)
 # Referenz-sha16 weiterer Dateien laut AUDIT-STAND.md (NICHT als bestaetigt gefuehrt -> nur Anzeige): "Pfad:sha16"
 REFS=(database.py:e7a7ef192c522480 lage_xml.py:f77305fc17ed2f77 mesh_bridge.py:3482f6e386cf26ce mesh_bridge_bayern.py:c1176b457346ae49
       mesh_bridge_core.py:ddc134f29a6a8949 luft.py:0ccae0834ab27f6d secret_util.py:ff8e2ac7049f4bde tools/backup.sh:5053f6b8a43a8638
       tools/restore.sh:c0e305b8ea4d9007 health_check.py:5a0156ff02d5960c prepper_docs.py:609f0a7f00ab586b lage_clock.py:c909aea1148518fe lage_disk.py:4b6b35ab7c97dfc7)
-AIRSPY_VIDPID="1d50:60a1"; AIRSPY_SN="637862DC2E8092D7"; STICK1_SN="19348831"; STICK2_SN="72055505"; STICK3_SN="26102403"
+AIRSPY_VIDPID="1d50:60a1"; RTL_VIDPID="0bda:2838"
+# Seriennummern seit commit59 (snFrei) nur lokal, nie im Repo. Leer = kein Soll-Vergleich (der alte Stick-2-Fehlalarm war ein HINWEIS zu viel).
+AIRSPY_SN="${FC_AIRSPY_SN:-}"; STICK1_SN="${FC_STICK1_SN:-}"; STICK2_SN="${FC_STICK2_SN:-}"; STICK3_SN="${FC_STICK3_SN:-}"
 
 # ---------------------------------------------------------------- Optionen
 QUICK=0; JSON=0; SUDO=0; NOCOL=0; SELFTEST=0
@@ -57,7 +79,7 @@ Aufruf:
   bash fullcheck.sh [Optionen]          (oder bash ~/fullcheck.sh)
 
 Optionen:
-  --kurz        ohne Seitentest der 26 Seiten/APIs und ohne langsame Pruefungen (quick_check, Archiv-Pruefsumme); Alias: --quick
+  --kurz        ohne Seitentest der Seiten/APIs und ohne langsame Pruefungen (quick_check, Archiv-Pruefsumme); Alias: --quick
   --json        Ausgabe maschinenlesbar (ein JSON-Dokument, ohne Secrets); Exit-Code wie sonst.
                 Stufen-Schluessel im JSON: ok, warn (= HINWEIS), fail (= FEHLER), info, skip
   --sudo        zusaetzlich lesende Pruefungen mit sudo (nur journalctl und dmesg); fragt einmal nach dem Passwort
@@ -662,6 +684,7 @@ else warn "Dienste" "systemctl fehlt - Dienstpruefung nicht moeglich" "Nur auf d
 
 # ================================================================ 4) Dashboard
 section "Dashboard (Port $PORT)"
+info "Dashboard-Port" "$PORT (Quelle: $PORT_SRC; Kiwix bleibt 8080)"
 BASEURL="http://$HOSTN:$PORT"
 DASH_UP=1; NINA_MODE=""; WD_ALL_LVL=""; WD_AIRSPY_LVL=""
 if ! have curl; then
@@ -695,7 +718,7 @@ if (( DASH_UP )); then
   fi
   PAGE1_BODY=""
   if (( QUICK )); then
-    skip "Seitentest (26 Seiten/APIs)" "mit --kurz uebersprungen"
+    skip "Seitentest (${#PAGES[@]} Seiten/APIs)" "mit --kurz uebersprungen"
   else
     NP=0; NPOK=0; NSKIPB=0
     for pg in "${PAGES[@]}"; do
@@ -879,22 +902,83 @@ if (( DASH_UP )); then
       done
     fi
   else skip "SDR-Daten-Watchdog" "/api/sdr/wd lieferte HTTP $HTTP_CODE"; fi
+
+  # --- optionale GET-Merkmale (404 = nicht installiert, keine Punkte; nie POST)
+  if (( QUICK )); then
+    skip "Weitere Seiten/APIs (${#OPT_GETS[@]})" "mit --kurz uebersprungen"
+  else
+  for pg in "${OPT_GETS[@]}"; do
+    if (( SECONDS - T0 > BUDGET_S )); then info "GET $pg" "Zeitbudget, nicht geprueft"; continue; fi
+    http_get "$BASEURL$pg" 8
+    if [[ "$HTTP_CODE" == "200" ]]; then
+      if jloads "$HTTP_BODY"; then ok "GET $pg" "HTTP 200, JSON, ${HTTP_MS} ms"
+      else ok "GET $pg" "HTTP 200 in ${HTTP_MS} ms"; fi
+    elif [[ "$HTTP_CODE" == "404" ]]; then info "GET $pg" "nicht installiert (HTTP 404), keine Punkte"
+    elif [[ "$HTTP_CODE" == "000" ]]; then warn "GET $pg" "keine Antwort (curl rc $HTTP_RC, ${HTTP_MS} ms)" "Dienst pruefen, falls das Merkmal installiert sein soll."
+    else warn "GET $pg" "HTTP $HTTP_CODE in ${HTTP_MS} ms" "Nur ansehen; dieses Skript sendet nichts."; fi
+  done
+  fi
+  # Uplink: aktueller Pfad ist ein Zustand, auch unklar ist kein Fehler
+  http_get "$BASEURL/api/uplink" 8
+  if [[ "$HTTP_CODE" == "200" ]] && jloads "$HTTP_BODY"; then
+    UCUR="$(jv current)"; UPATH="$(jv path)"
+    case "$UCUR" in
+      telekom|starlink|unclear|unklar) ok "/api/uplink" "current=${UCUR:-?}, path=${UPATH:-?}, ${HTTP_MS} ms" ;;
+      *) warn "/api/uplink" "JSON ohne bekannten current-Wert (${UCUR:-leer})" "uplinkDetect pruefen (nur lesen)." ;;
+    esac
+  elif [[ "$HTTP_CODE" == "404" ]]; then warn "/api/uplink" "nicht vorhanden (HTTP 404)" "uplinkDetect ist Teil des aktuellen Stands."
+  else warn "/api/uplink" "HTTP $HTTP_CODE" "GET /api/uplink pruefen."; fi
 fi
 
+# Kiwix (Port 8080, getrennt vom Dashboard). Aus = HINWEIS, nicht FEHLER.
+section "Kiwix (Port 8080)"
+if have curl; then
+  http_get "http://$HOSTN:8080/" 5
+  if [[ "$HTTP_CODE" == "200" ]]; then ok "Kiwix" "HTTP 200 in ${HTTP_MS} ms"
+  elif [[ "$HTTP_CODE" == "000" ]]; then warn "Kiwix" "Port 8080 antwortet nicht (curl rc $HTTP_RC)" "Dienst nur ansehen; dieses Skript startet nichts."
+  else warn "Kiwix" "HTTP $HTTP_CODE in ${HTTP_MS} ms" "Nur ansehen."; fi
+else info "Kiwix" "curl fehlt"; fi
+
 # ================================================================ 5) Patch-Stand
-section "Patch-Stand (Soll: AUDIT-STAND.md, nach commit47)"
+section "Patch-Stand (Soll: Apply-Basis 14.11.2026, Blackout Schritt 6/7)"
 DASHF="$APP/dashboard.py"
 if [[ -r "$DASHF" ]]; then
   DSH="$(sha16_of "$DASHF")"
-  if [[ "$DSH" == "$DASH_SHA16" ]]; then ok "dashboard.py sha16" "$DSH = Soll (Pi-Stand nach commit47), $(wc -l < "$DASHF") Zeilen"
-  else warn "dashboard.py sha16" "$DSH, Soll $DASH_SHA16 (nach commit47)" "Neuer Patch seit commit47 oder Abweichung? Dann Soll im Skript (FC_DASH_SHA16) nachziehen; sonst Stand gegen AUDIT-STAND.md pruefen."; fi
-  MKBAD=""; MKSUM=""
+  DBSZ="$(stat -c %s -- "$DASHF" 2>/dev/null || echo 0)"
+  if [[ "$DSH" == "$DASH_SHA16" && "$DBSZ" == "$DASH_BYTES" ]]; then ok "dashboard.py sha16" "$DSH, $DBSZ Bytes = Soll aus apply-blackout-radar-7.py (Datei von Schritt 6 und 7 nicht geaendert)"
+  elif [[ "$DSH" == "$DASH_SHA16" ]]; then warn "dashboard.py sha16" "$DSH stimmt, Groesse $DBSZ statt $DASH_BYTES" "Soll aus apply-blackout-radar-7.py; Groesse pruefen."
+  else warn "dashboard.py sha16" "live $DSH, $DBSZ Bytes; Soll $DASH_SHA16 / $DASH_BYTES" "Soll ist die Basis in apply-blackout-radar-7.py. Weicht der Pi ab, Hash hier nicht raten (FC_DASH_SHA16 setzen, wenn der neue Soll belegt ist)."; fi
+  MKBAD=""; MKDUP=""
   for m in "${MARKERS[@]}"; do
-    c="$(grep -c "# ===== $m:" "$DASHF" 2>/dev/null)"; [[ "$c" =~ ^[0-9]+$ ]] || c="?"
-    MKSUM+=" $m=$c"; [[ "$c" == 1 ]] || MKBAD+=" $m=$c"
+    c=0
+    for mf in "$DASHF" "$APP/lage_pages.py"; do
+      [[ -r "$mf" ]] || continue
+      n="$(grep -c -F "# ===== $m:" "$mf" 2>/dev/null || true)"
+      [[ "$n" =~ ^[0-9]+$ ]] && c=$((c + n))
+    done
+    if [[ "$c" == 1 ]]; then :
+    elif (( c >= 2 )); then MKDUP+=" $m=$c"
+    else MKBAD+=" $m=$c"; fi
   done
-  if [[ -z "$MKBAD" ]]; then ok "Patch-Marker in dashboard.py" "alle ${#MARKERS[@]} Marker genau 1x:$MKSUM"
-  else fail "Patch-Marker in dashboard.py" "nicht genau 1x:$MKBAD (0 = Patch fehlt, 2 oder mehr = doppelt angewendet)" "Patch-Stand mit AUDIT-STAND.md vergleichen; nichts von Hand aendern, Patch-Reihenfolge pruefen."; fi
+  if [[ -z "$MKBAD" && -z "$MKDUP" ]]; then ok "Patch-Marker Kern" "alle ${#MARKERS[@]} Marker (# ===== Name:) genau 1x"
+  else
+    [[ -n "$MKDUP" ]] && fail "Patch-Marker doppelt" "mehr als 1x:$MKDUP" "Patch doppelt? Nichts von Hand aendern."
+    [[ -n "$MKBAD" ]] && warn "Patch-Marker Kern" "nicht genau 1x:$MKBAD" "0 = Kommentar fehlt. Ein Hinweis fuer die ganze Liste, kein Punkt je Marker."; fi
+  mark_one() { # label needle file  — fehlt = HINWEIS (im Soll-dashboard belegt)
+    local lab="$1" nd="$2" f="$3" c
+    [[ -r "$f" ]] || { info "$lab" "$(basename "$f") nicht lesbar"; return; }
+    c="$(grep -c -F "$nd" "$f" 2>/dev/null || true)"
+    if [[ "$c" =~ ^[0-9]+$ && "$c" -ge 1 ]]; then ok "$lab" "$nd ${c}x in $(basename "$f")"
+    else warn "$lab" "$nd fehlt in $(basename "$f")" "Steht im Apply, das den Soll-Hash erzeugt. Nur lesen."; fi
+  }
+  if grep -q -F "blackoutRadar" "$DASHF" 2>/dev/null; then ok "Marker blackoutRadar" "in dashboard.py"
+  elif [[ ! -f "$APP/blackout_radar.py" ]]; then info "Marker blackoutRadar" "nicht installiert (keine blackout_radar.py), keine Punkte"
+  else warn "Marker blackoutRadar" "blackout_radar.py liegt da, der Marker in dashboard.py fehlt" "Apply-Schritt 1 pruefen (nur lesen)."; fi
+  mark_one "Marker UG-DSL" "UG-DSL" "$DASHF"
+  mark_one "Marker _PSH_ARM" "_PSH_ARM" "$DASHF"
+  if grep -q -F -e "dslRueck" -e "_t4_dsl_recovered" "$DASHF" 2>/dev/null; then ok "Marker dslRueck" "dslRueck / _t4_dsl_recovered in dashboard.py (PR 1, 07.11.2026, gemergt)"
+  else info "Marker dslRueck" "Text nicht in dashboard.py. Apply ist auf prepper-patches gemergt; ob die spaetere Pi-Datei ihn noch traegt, steht nicht als Hash-Soll fest. Keine Punkte."; fi
+  info "PR-Stand" "Hashes kommen aus den Apply-Skripten auf prepper-patches/main. Offene PRs in kaeswasser-lage-monitor sind kein zweites Soll und werden hier nicht abgefragt."
 else fail "dashboard.py" "$DASHF nicht lesbar" "Pfad/Rechte pruefen."; fi
 # NINA: gepinnte Zwischenstelle (ninaFix) - nur Datei lesen, DER-sha256 vergleichen (oeffentliches Zertifikat, kein Schluessel)
 PEMF="$APP/$NINA_PEM_REL"
@@ -940,8 +1024,28 @@ for ref in "${REFS[@]}"; do
   h="$(sha16_of "$APP/$rf")"
   if [[ "${h:0:${#rs}}" == "$rs" ]]; then SAME=$((SAME + 1)); else DIFF+=" $rf=$h"; fi
 done
-info "weitere Dateien (nur Anzeige)" "$SAME von ${#REFS[@]} gleich der Referenz der Stand-Datei (Sollwerte dort unbestaetigt)${DIFF:+; abweichend:$DIFF}${MISS:+; fehlt:$MISS}"
-for rf in prepper_sdr.py sdr_manager.py sdr_config.json; do [[ -f "$APP/$rf" ]] && info "sha16 $rf" "$(sha16_of "$APP/$rf")"; done
+info "weitere Dateien (nur Anzeige)" "$SAME von ${#REFS[@]} gleich der alten Referenz (Werte vor commit59, nicht der aktuelle Soll)${DIFF:+; abweichend:$DIFF}${MISS:+; fehlt:$MISS}"
+for rf in prepper_sdr.py sdr_manager.py sdr_config.json ups_manager.py prepper_docs.py; do [[ -f "$APP/$rf" ]] && info "sha16 $rf" "$(sha16_of "$APP/$rf") ($(stat -c %s -- "$APP/$rf" 2>/dev/null || echo '?') Bytes, nur Anzeige)"; done
+# lage_pages.py und pushover_push.py: Soll aus apply-blackout-radar-7.py (CHECK, unveraendert)
+sha_soll() { # rel label expect16 expectbytes missing-severity
+  local rel="$1" lab="$2" exp="$3" eb="$4" miss="$5" f h sz
+  f="$APP/$rel"
+  if [[ ! -f "$f" ]]; then _emit "$miss" "$lab" "$rel fehlt" "Aktueller Stand hat die Datei (Apply-Basis 14.11.2026)."; return; fi
+  h="$(sha16_of "$f")"; sz="$(stat -c %s -- "$f" 2>/dev/null || echo 0)"
+  if [[ "$h" == "$exp" && "$sz" == "$eb" ]]; then ok "$lab" "$h, $sz Bytes = Soll"
+  elif [[ "$h" == "$exp" ]]; then warn "$lab" "$h stimmt, Groesse $sz statt $eb" "Soll aus apply-blackout-radar-7.py."
+  else warn "$lab" "live $h, $sz Bytes; Soll $exp / $eb" "Live-Hash steht oben. Keinen neuen Soll raten."; fi
+}
+sha_soll lage_pages.py "lage_pages.py sha16" "$LAGE_SHA16" "$LAGE_BYTES" fail
+sha_soll pushover_push.py "pushover_push.py sha16" "$PUSH_SHA16" "$PUSH_BYTES" warn
+BORF="$APP/blackout_radar.py"
+if [[ ! -f "$BORF" ]]; then info "Blackout-Radar Datei" "blackout_radar.py fehlt - Merkmal nicht installiert, keine Punkte"
+else
+  BH="$(sha16_of "$BORF")"; BZ="$(stat -c %s -- "$BORF" 2>/dev/null || echo 0)"
+  if [[ "$BH" == "$BOR6_SHA16" && "$BZ" == "$BOR6_BYTES" ]]; then ok "Blackout-Radar Datei" "Schritt 6 ($BH, $BZ Bytes). Schritt 7 aendert nur diese Datei; der End-Hash ist aus dem Apply ohne die Pi-Datei nicht berechenbar."
+  elif grep -q -F "RESERVE_WOCHE" "$BORF" 2>/dev/null && grep -q -F "reserve_refresh_last" "$BORF" 2>/dev/null; then ok "Blackout-Radar Datei" "Schritt 7 (Reserve woechentlich), live sha16 $BH, $BZ Bytes. End-Soll steht nicht im Apply-Skript."
+  else warn "Blackout-Radar Datei" "live $BH, $BZ Bytes; weder Schritt-6-Soll $BOR6_SHA16/$BOR6_BYTES noch Reserve-Marker" "Apply Schritt 6/7 pruefen (nur lesen)."; fi
+fi
 
 # ================================================================ 6) Mesh
 section "Mesh (Bridges nur lesen)"
@@ -1029,24 +1133,36 @@ sdr_dev() { # serial name severity-if-missing
 airspy_check() {
   local nm="Airspy R2 (11D fest)" got="${USBID_SN[$AIRSPY_VIDPID]:-}" exp="${AIRSPY_SN^^}" src="sysfs"
   [[ -n "${USBID[$AIRSPY_VIDPID]:-}" ]] || src=""
-  if [[ -n "$src" ]]; then
-    if [[ -n "${USBSN[$exp]:-}" ]]; then ok "$nm (SN $AIRSPY_SN)" "am USB-Bus gefunden (VID:PID $AIRSPY_VIDPID), Seriennummer passt"
-    elif [[ -n "$got" ]]; then warn "$nm (SN $AIRSPY_SN)" "VID:PID $AIRSPY_VIDPID gefunden, aber Seriennummer weicht ab (gelesen: ${got:0:24}, erwartet: $AIRSPY_SN)" "Anderer Airspy angesteckt oder getauscht? Nur Anzeige - Empfang laeuft laut Watchdog separat (Dashboard /funk)."
-    else ok "$nm (SN $AIRSPY_SN)" "am USB-Bus gefunden (VID:PID $AIRSPY_VIDPID); Seriennummer im sysfs nicht lesbar - nur die Existenz geprueft"; fi
+  if [[ -z "$exp" ]]; then
+    if [[ -n "$src" ]]; then ok "$nm" "am USB-Bus (VID:PID $AIRSPY_VIDPID). Seriennummer wird nicht verglichen (snFrei, nur FC_AIRSPY_SN)."
+    elif [[ "$WD_AIRSPY_LVL" == ok || ( -z "$WD_AIRSPY_LVL" && "$WD_ALL_LVL" == ok ) ]]; then
+      warn "$nm" "VID:PID $AIRSPY_VIDPID nicht in der USB-Liste, Daten-Watchdog meldet Empfang ok" "lsusb nur ansehen; Empfang laeuft offenbar."
+    else
+      fail "$nm" "nicht am USB-Bus (VID:PID $AIRSPY_VIDPID), Watchdog: ${WD_AIRSPY_LVL:-${WD_ALL_LVL:-keine Angabe}}" "Airspy/USB pruefen; SDR nur ueber prepper-sdr."; fi
     return
   fi
-  if [[ -n "${USBSN[$exp]:-}" ]]; then ok "$nm (SN $AIRSPY_SN)" "ueber die Seriennummer am USB-Bus gefunden: ${USBSN[$exp]:0:40}"; return; fi
-  if [[ "$WD_AIRSPY_LVL" == ok || ( -z "$WD_AIRSPY_LVL" && "$WD_ALL_LVL" == ok ) ]]; then
-    warn "$nm (SN $AIRSPY_SN)" "Widerspruch: weder VID:PID $AIRSPY_VIDPID noch Seriennummer am USB-Bus gefunden, aber der Daten-Watchdog meldet Empfang ok" "lsusb als Benutzer fmg lesen (nur Anzeige); Skript/Rechte pruefen, Empfang laeuft offenbar."
-  else
-    fail "$nm (SN $AIRSPY_SN)" "nicht am USB-Bus gefunden (VID:PID $AIRSPY_VIDPID) und der Daten-Watchdog meldet keinen Empfang (${WD_AIRSPY_LVL:-${WD_ALL_LVL:-keine Angabe}})" "Airspy/USB-Kabel/Hub pruefen (lsusb); SDR-Zugriff nur ueber prepper-sdr."
+  if [[ -n "$src" ]]; then
+    if [[ -n "${USBSN[$exp]:-}" ]]; then ok "$nm" "VID:PID $AIRSPY_VIDPID, Seriennummer aus FC_AIRSPY_SN passt"
+    elif [[ -n "$got" ]]; then warn "$nm" "VID:PID gefunden, Seriennummer weicht ab (gelesen: ${got:0:24})" "Nur Anzeige."
+    else ok "$nm" "VID:PID $AIRSPY_VIDPID; Seriennummer im sysfs nicht lesbar"; fi
+    return
   fi
+  if [[ -n "${USBSN[$exp]:-}" ]]; then ok "$nm" "ueber FC_AIRSPY_SN gefunden: ${USBSN[$exp]:0:40}"; return; fi
+  if [[ "$WD_AIRSPY_LVL" == ok || ( -z "$WD_AIRSPY_LVL" && "$WD_ALL_LVL" == ok ) ]]; then
+    warn "$nm" "weder VID:PID noch FC_AIRSPY_SN am Bus, Watchdog ok" "lsusb nur ansehen."
+  else
+    fail "$nm" "nicht am USB-Bus und Watchdog ohne Empfang (${WD_AIRSPY_LVL:-${WD_ALL_LVL:-keine Angabe}})" "Airspy/USB pruefen."; fi
 }
 if (( ${#USBSN[@]} > 0 || ${#USBID[@]} > 0 )); then
   airspy_check
-  sdr_dev "$STICK1_SN" "Stick 1 (5C/10C)" fail
-  sdr_dev "$STICK2_SN" "Stick 2 (hobby)" warn
-  sdr_dev "$STICK3_SN" "Stick 3 (hobby2)" warn
+  if [[ -n "$STICK1_SN" || -n "$STICK2_SN" || -n "$STICK3_SN" ]]; then
+    [[ -n "$STICK1_SN" ]] && sdr_dev "$STICK1_SN" "Stick 1 (5C)" fail
+    [[ -n "$STICK2_SN" ]] && sdr_dev "$STICK2_SN" "Stick 2 (hobby)" warn
+    [[ -n "$STICK3_SN" ]] && sdr_dev "$STICK3_SN" "Stick 3 (Pinneberg)" warn
+  else
+    RTLN="${USBID[$RTL_VIDPID]:-0}"
+    info "RTL-SDR am USB-Bus" "$RTLN Geraet(e) mit VID:PID $RTL_VIDPID (Stick 1 = 5C, Stick 3 = Pinneberg/SpyVerter). Ohne lokale Seriennummer keine Zuordnung und keine Punkte."
+  fi
 else skip "SDR-Sticks am USB-Bus" "keine USB-Geraeteliste lesbar ($SYS/bus/usb/devices, lsusb)"; fi
 AGF="$APP/sdr_autogain.json"
 if [[ -r "$AGF" ]] && jload flat < "$AGF"; then
@@ -1291,7 +1407,10 @@ else
     echo "FEHLER:"; for i in "${!R_NAME[@]}"; do [[ "${R_ST[$i]}" == fail ]] && printf '  - %s: %s\n' "${R_NAME[$i]}" "${R_DET[$i]}"; done
   fi
   if (( N_WARN > 0 )); then
-    echo "HINWEIS:"; for i in "${!R_NAME[@]}"; do [[ "${R_ST[$i]}" == warn ]] && printf '  - %s: %s\n' "${R_NAME[$i]}" "${R_DET[$i]}"; done
+    echo "Hinweise:"; for i in "${!R_NAME[@]}"; do [[ "${R_ST[$i]}" == warn ]] && printf '  - %s: %s\n' "${R_NAME[$i]}" "${R_DET[$i]}"; done
+  fi
+  if (( N_INFO > 0 )); then
+    echo "Infos:"; for i in "${!R_NAME[@]}"; do [[ "${R_ST[$i]}" == info ]] && printf '  - %s: %s\n' "${R_NAME[$i]}" "${R_DET[$i]}"; done
   fi
   if (( N_SKIP > 0 && ! SUDO )); then echo "Hinweis: uebersprungene Pruefungen brauchen teils sudo - mit --sudo wiederholen (nur lesend)."; fi
 fi
