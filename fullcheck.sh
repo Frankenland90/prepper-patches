@@ -11,7 +11,7 @@ export TZ=Europe/Berlin
 export PYTHONDONTWRITEBYTECODE=1
 export PATH="${PATH:-/usr/bin:/bin}:/usr/sbin:/sbin:/usr/local/bin"
 
-FC_VERSION="2.1.0"
+FC_VERSION="2.1.1"
 T0=$SECONDS
 
 # ---------------------------------------------------------------- Konfiguration (Umgebungsvariablen FC_* nur fuer Tests/Sonderfaelle)
@@ -57,7 +57,7 @@ PAGES=(/ /funk /pi /umwelt /funk433 /aprs /meteor /rundfunk /energie /dabhist /m
 # Weitere Kacheln/Seiten und GET-APIs. HTTP 404 = nicht installiert, keine Punkte. Kein POST, kein /api/download_test.
 OPT_GETS=(/lokale-energie /speicher /luft /pegel /adsb /zuhause /mesh2 /news /medizin /system
           /api/usv /api/blackout/radar /api/audio/status /api/archive/status /api/sd_health /api/clone/status /api/geo/status /api/funk/harden /api/speedtest)
-MARKERS=(relHygiene perfKeep sameOrigin alarmFaden relWatch dbVis mapUi modDead secXmlDash wxSlot meshBootQuiet funkHarden2 kartevec clockOff ninaFix hideTexts longArchive relStop asyncMini pagesSplit1 pagesSplit2 pagesSplit3 pegelSplit perfWsgi perf03Cache speedAsync)   # je genau 1x "# ===== <Name>:"
+MARKERS=(relHygiene perfKeep sameOrigin alarmFaden relWatch dbVis mapUi modDead secXmlDash wxSlot meshBootQuiet funkHarden2 kartevec clockOff ninaFix hideTexts longArchive relStop asyncMini pagesSplit1 pagesSplit2 pagesSplit3 pegelSplit perfWsgi perf03Cache speedAsync)   # vorhanden; doppelt nur bei mehr als 1x in EINER Datei (Split: je 1x in dashboard.py und lage_pages.py)
 NINA_PEM_REL="certs/sectigo-e36.pem"; NINA_PEM_DER16="873f0ba8"   # DER-sha256 beginnt so (Sectigo Public Server Authentication CA DV E36)
 # Referenz-sha16 weiterer Dateien laut AUDIT-STAND.md (NICHT als bestaetigt gefuehrt -> nur Anzeige): "Pfad:sha16"
 REFS=(database.py:e7a7ef192c522480 lage_xml.py:f77305fc17ed2f77 mesh_bridge.py:3482f6e386cf26ce mesh_bridge_bayern.py:c1176b457346ae49
@@ -950,20 +950,21 @@ if [[ -r "$DASHF" ]]; then
   else warn "dashboard.py sha16" "live $DSH, $DBSZ Bytes; Soll $DASH_SHA16 / $DASH_BYTES" "Soll ist die Basis in apply-blackout-radar-7.py. Weicht der Pi ab, Hash hier nicht raten (FC_DASH_SHA16 setzen, wenn der neue Soll belegt ist)."; fi
   MKBAD=""; MKDUP=""
   for m in "${MARKERS[@]}"; do
-    c=0
+    c=0; dupf=""
     for mf in "$DASHF" "$APP/lage_pages.py"; do
       [[ -r "$mf" ]] || continue
       n="$(grep -c -F "# ===== $m:" "$mf" 2>/dev/null || true)"
-      [[ "$n" =~ ^[0-9]+$ ]] && c=$((c + n))
+      [[ "$n" =~ ^[0-9]+$ ]] || n=0
+      c=$((c + n))
+      if (( n >= 2 )); then dupf+=" $(basename "$mf")=$n"; fi
     done
-    if [[ "$c" == 1 ]]; then :
-    elif (( c >= 2 )); then MKDUP+=" $m=$c"
-    else MKBAD+=" $m=$c"; fi
+    if [[ -n "$dupf" ]]; then MKDUP+=" $m:$dupf"
+    elif (( c == 0 )); then MKBAD+=" $m=0"; fi
   done
-  if [[ -z "$MKBAD" && -z "$MKDUP" ]]; then ok "Patch-Marker Kern" "alle ${#MARKERS[@]} Marker (# ===== Name:) genau 1x"
+  if [[ -z "$MKBAD" && -z "$MKDUP" ]]; then ok "Patch-Marker Kern" "alle ${#MARKERS[@]} Marker vorhanden, je Datei hoechstens 1x (Split darf in dashboard.py und lage_pages.py je 1x stehen)"
   else
-    [[ -n "$MKDUP" ]] && fail "Patch-Marker doppelt" "mehr als 1x:$MKDUP" "Patch doppelt? Nichts von Hand aendern."
-    [[ -n "$MKBAD" ]] && warn "Patch-Marker Kern" "nicht genau 1x:$MKBAD" "0 = Kommentar fehlt. Ein Hinweis fuer die ganze Liste, kein Punkt je Marker."; fi
+    [[ -n "$MKDUP" ]] && fail "Patch-Marker doppelt" "mehr als 1x in einer Datei:$MKDUP" "1x je Datei ist der Split-Stand. Mehr als 1x in derselben Datei pruefen."
+    [[ -n "$MKBAD" ]] && warn "Patch-Marker Kern" "in beiden Dateien 0x:$MKBAD" "0 = Kommentar fehlt. Ein Hinweis fuer die ganze Liste, kein Punkt je Marker."; fi
   mark_one() { # label needle file  — fehlt = HINWEIS (im Soll-dashboard belegt)
     local lab="$1" nd="$2" f="$3" c
     [[ -r "$f" ]] || { info "$lab" "$(basename "$f") nicht lesbar"; return; }
