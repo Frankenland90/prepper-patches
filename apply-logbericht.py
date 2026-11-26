@@ -77,7 +77,10 @@ def fullcheck_neu(text, dash_sha, dash_n):
         )
         neu = neu.replace(anker, block, 1)
     if "3916f7d880b13569" not in neu:
-        raise RuntimeError("push")
+        import re as _re
+        neu, _n = _re.subn(r"2267a556[0-9a-f]{8}", "3916f7d880b13569", neu)
+        if _n < 1:
+            raise RuntimeError("push")
     if "Basis logbericht" not in neu and "# fullcheck.sh" in neu:
         neu = neu.replace("# fullcheck.sh", "# fullcheck.sh Basis logbericht", 1)
     return neu
