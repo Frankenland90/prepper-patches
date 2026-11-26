@@ -147,7 +147,7 @@ After=network.target
 [Service]
 Type=simple
 User=icecast2
-Group=icecast2
+Group=icecast
 ExecStart=/usr/bin/icecast2 -c /etc/icecast2/flugfunk.xml
 Restart=on-failure
 RestartSec=2
@@ -170,7 +170,7 @@ exec ffmpeg -loglevel error -re -i "$LIVE" -c copy -f mp3 "icecast://source:${PW
 def unit_install(ordner):
     basis = Path(ordner)
     befehle = [
-        ["sudo", "-n", "install", "-o", "icecast2", "-g", "icecast2", "-m", "640", str(basis / "icecast-flugfunk.xml"), "/etc/icecast2/flugfunk.xml"],
+        ["sudo", "-n", "install", "-o", "icecast2", "-g", "icecast", "-m", "640", str(basis / "icecast-flugfunk.xml"), "/etc/icecast2/flugfunk.xml"],
         ["sudo", "-n", "cp", str(basis / "prepper-icecast.service"), "/etc/systemd/system/prepper-icecast.service"],
         ["sudo", "-n", "systemctl", "daemon-reload"],
         ["sudo", "-n", "systemctl", "enable", "--now", "prepper-icecast.service"],
