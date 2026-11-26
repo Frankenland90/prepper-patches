@@ -90,10 +90,10 @@ def anwenden(root, fullcheck, hashcheck, dry, kein, minute):
         for alt, neu in paare:
             texte[name] = ersetze(texte[name], alt, neu, name)
     fc_text = ersetze(fc_text, PAYLOAD["ice_alt"], PAYLOAD["ice_neu"], "fullcheck")
-    if 'FULLCHECK_VERSION="2.9"' in fc_text:
-        fc_text = ersetze(fc_text, 'FULLCHECK_VERSION="2.9"', 'FULLCHECK_VERSION="2.10"', "version")
-    elif 'FULLCHECK_VERSION="2.8"' in fc_text:
-        fc_text = ersetze(fc_text, 'FULLCHECK_VERSION="2.8"', 'FULLCHECK_VERSION="2.10"', "version")
+    if 'FC_VERSION="2.9"' in fc_text:
+        fc_text = ersetze(fc_text, 'FC_VERSION="2.9"', 'FC_VERSION="2.10"', "version")
+    elif 'FC_VERSION="2.8"' in fc_text:
+        fc_text = ersetze(fc_text, 'FC_VERSION="2.8"', 'FC_VERSION="2.10"', "version")
     else:
         print("STOP fullcheck-Version fehlt")
         return 2
@@ -142,7 +142,7 @@ def anwenden(root, fullcheck, hashcheck, dry, kein, minute):
 
 def selftest():
     import tempfile
-    alt_fc = "ok(){ :; }\nwarn(){ :; }\ninfo(){ :; }\nFULLCHECK_VERSION=\"2.9\"\n" + PAYLOAD["ice_alt"]
+    alt_fc = "ok(){ :; }\nwarn(){ :; }\ninfo(){ :; }\nFC_VERSION=\"2.9\"\n" + PAYLOAD["ice_alt"]
     with tempfile.TemporaryDirectory() as tmp:
         root = os.path.join(tmp, "app")
         os.makedirs(root)
@@ -171,7 +171,7 @@ def selftest():
             raise SystemExit("selftest flugfunk")
         if "timeout=4" not in luft and "timeout=4)" not in luft and "result(timeout=4)" not in luft:
             raise SystemExit("selftest luft")
-        if "curl -sI" in fc_text or "-r 0-0" not in fc_text or 'FULLCHECK_VERSION="2.10"' not in fc_text:
+        if "curl -sI" in fc_text or "-r 0-0" not in fc_text or 'FC_VERSION="2.10"' not in fc_text:
             raise SystemExit("selftest fullcheck")
         if "icecast://source:${" in text:
             raise SystemExit("selftest argv")
@@ -185,7 +185,7 @@ def main(argv=None):
     parser.add_argument("--kein-neustart", action="store_true")
     parser.add_argument("--selftest", action="store_true")
     parser.add_argument("--basis", default=BASIS)
-    parser.add_argument("--fullcheck", default="/home/fmg/prepper-dashboard/fullcheck.sh")
+    parser.add_argument("--fullcheck", default="/home/fmg/fullcheck.sh")
     parser.add_argument("--fullcheck-hash", default=FC_HASH)
     args = parser.parse_args(argv)
     if args.fullcheck_hash != FC_HASH:
