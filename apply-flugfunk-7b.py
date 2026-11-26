@@ -27,7 +27,7 @@ ALT = """  if [[ "$HTTP_BODY" == *'"metar_aktuell": true'* && "$HTTP_BODY" == *'
   else fail "ADS-B-Quelle" "fehlt" "tar1090 aircraft.json"; fi
   if [[ "$HTTP_BODY" != *'look one lima'* && "$HTTP_BODY" != *'125355'* ]]; then ok "Erkennung" "kein Unsinn"
   else fail "Erkennung" "Unsinn sichtbar" "Confidence-Filter"; fi
-  if [[ "$HTTP_BODY" == *'"zahl":'* ]]; then ok "Kanalzaehler" "Spruch je Kanal"
+  if [[ "$HTTP_BODY" == *'"zahl"'* ]]; then ok "Kanalzaehler" "Spruch je Kanal"
   else fail "Kanalzaehler" "fehlt" "Zuordnung"; fi
 """
 NEU = """  http_get "$BASEURL/api/flugfunk" 8
