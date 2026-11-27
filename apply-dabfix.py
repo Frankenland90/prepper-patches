@@ -18,7 +18,6 @@ import hashlib
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
 import time
 from datetime import datetime
@@ -64,7 +63,7 @@ FF_PAARE = [
     (
         "    audio.src='/flugfunk?t='+Date.now();",
         "    audio.src='/api/flugfunk/stream?t='+Date.now();",
-        2,
+        (1, 2),
     ),
 ]
 
@@ -87,11 +86,29 @@ def berlin_minute():
     return berlin_jetzt().minute
 
 
+def anker_ok(c, n):
+    if isinstance(n, (tuple, list, set)):
+        return c in n
+    return c == n
+
+
 def ersetze(text, alt, neu, name, n):
     c = text.count(alt)
-    if c != n:
-        raise SystemExit("STOP %s Anker %s erwartet %s" % (name, c, n))
+    if not anker_ok(c, n):
+        soll = " oder ".join(str(x) for x in n) if isinstance(n, (tuple, list, set)) else n
+        raise SystemExit("STOP %s Anker %s erwartet %s" % (name, c, soll))
     return text.replace(alt, neu)
+
+
+def stub_aus(paare, live_n=None):
+    teile = []
+    for alt, _neu, n in paare:
+        if isinstance(n, (tuple, list, set)):
+            k = live_n if live_n is not None else max(n)
+        else:
+            k = n
+        teile.extend([alt] * k)
+    return teile
 
 
 def patch_sdr(text):
@@ -194,7 +211,7 @@ def berechne_ff(pfad, hashcheck=True):
         return None, None, "STOP %s nicht UTF-8" % pfad
     if schon_ff(roh):
         return alt, None, None
-    # mind. der Filter-Anker muss passen; Live-URL 2x, falls schon teilweise geaendert: zaehlen
+    # Filter-Anker strikt 1x; Live-Taste 1 oder 2 Vorkommen, alle ersetzen
     try:
         text = patch_ff(roh)
     except SystemExit as exc:
@@ -281,7 +298,7 @@ def anwenden(root, dry, kein, minute, hashcheck=True, pause=90):
         return 2
     falt, fneu, ffehl = berechne_ff(ff, hashcheck)
     if ffehl:
-        print(ffeh)
+        print(ffehl)
         return 2
     if sneu is None and fneu is None:
         print("bereits installiert, keine Aenderung, kein Neustart")
@@ -354,10 +371,8 @@ def selftest():
         os.makedirs(root)
         sdr = os.path.join(root, "prepper_sdr.py")
         ff = os.path.join(root, "flugfunk.py")
-        open(sdr, "w", encoding="utf-8").write(
-            "# stub\n" + "".join(alt for alt, _n, n in SDR_PAARE for _i in range(n)))
-        open(ff, "w", encoding="utf-8").write(
-            "# stub\n" + "".join(alt for alt, _n, n in FF_PAARE for _i in range(n)))
+        open(sdr, "w", encoding="utf-8").write("# stub\n" + "".join(stub_aus(SDR_PAARE)))
+        open(ff, "w", encoding="utf-8").write("# stub\n" + "".join(stub_aus(FF_PAARE, live_n=2)))
         os.chmod(sdr, 0o640)
         os.chmod(ff, 0o640)
         vorher_s = open(sdr, "rb").read()
@@ -389,6 +404,28 @@ def selftest():
             raise SystemExit("selftest backup %s" % bak)
         if anwenden(root, False, True, 12, hashcheck=False, pause=0) != 0:
             raise SystemExit("selftest idempotent")
+        if ft.count("audio.src='/api/flugfunk/stream?t='") != 2:
+            raise SystemExit("selftest ff stream2 %s" % ft.count("audio.src='/api/flugfunk/stream?t='"))
+
+    # Live-Taste nur 1x
+    with tempfile.TemporaryDirectory(prefix="dabfix-live1-") as tmp1:
+        root = os.path.join(tmp1, "app")
+        os.makedirs(root)
+        open(os.path.join(root, "prepper_sdr.py"), "w", encoding="utf-8").write(
+            "# stub\n" + "".join(stub_aus(SDR_PAARE)))
+        open(os.path.join(root, "flugfunk.py"), "w", encoding="utf-8").write(
+            "# stub\n" + "".join(stub_aus(FF_PAARE, live_n=1)))
+        if anwenden(root, False, True, 12, hashcheck=False, pause=0) != 0:
+            raise SystemExit("selftest live1 lauf")
+        ft1 = open(os.path.join(root, "flugfunk.py"), encoding="utf-8").read()
+        if "audio.src='/flugfunk?t='" in ft1:
+            raise SystemExit("selftest live1 alt")
+        if ft1.count("audio.src='/api/flugfunk/stream?t='") != 1:
+            raise SystemExit("selftest live1 stream %s" % ft1.count("audio.src='/api/flugfunk/stream?t='"))
+        if "if k is not None and k < MIN_P and not notfall:" not in ft1:
+            raise SystemExit("selftest live1 filter")
+        if anwenden(root, False, True, 12, hashcheck=False, pause=0) != 0:
+            raise SystemExit("selftest live1 idempotent")
 
     quelle, data, h = _finde_sdr()
     if not quelle:
@@ -399,7 +436,7 @@ def selftest():
         ziel = os.path.join(root, "prepper_sdr.py")
         # flugfunk-Stub mit echten Ankern, damit berechne_ff nicht STOPPT
         open(os.path.join(root, "flugfunk.py"), "w", encoding="utf-8").write(
-            "# stub\n" + "".join(alt for alt, _n, n in FF_PAARE for _i in range(n)))
+            "# stub\n" + "".join(stub_aus(FF_PAARE, live_n=2)))
         if h == END_SHA:
             open(ziel, "wb").write(data)
         else:
